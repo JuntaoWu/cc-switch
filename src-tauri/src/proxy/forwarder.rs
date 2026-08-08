@@ -2331,6 +2331,20 @@ impl RequestForwarder {
             };
             let body_text = String::from_utf8(decoded).ok();
 
+            if status_code == 400 {
+                let incoming_model = body.get("model").and_then(|value| value.as_str());
+                let adapter_name = adapter.name();
+                let diagnostic = format_upstream_error_diagnostic(
+                    incoming_model,
+                    adapter_name,
+                    outbound_model.as_deref(),
+                    &effective_endpoint,
+                    status_code,
+                    body_text.as_deref(),
+                );
+                log::warn!("[{adapter_name}] {diagnostic}");
+            }
+
             Err(ProxyError::UpstreamError {
                 status: status_code,
                 body: body_text,
@@ -3334,6 +3348,28 @@ fn summarize_text_for_log(text: &str, max_chars: usize) -> String {
     format!("{truncated}...")
 }
 
+fn format_upstream_error_diagnostic(
+    incoming_model: Option<&str>,
+    adapter_name: &str,
+    outbound_model: Option<&str>,
+    endpoint: &str,
+    status_code: u16,
+    response_body: Option<&str>,
+) -> String {
+    let response_body_preview = response_body
+        .map(|text| summarize_text_for_log(text, 2000))
+        .unwrap_or_else(|| "<empty>".to_string());
+
+    format!(
+        "HTTP {status_code} upstream error: incoming_model={}, adapter={}, outbound_model={}, endpoint={}, response_body={}",
+        incoming_model.unwrap_or("<none>"),
+        adapter_name,
+        outbound_model.unwrap_or("<none>"),
+        endpoint,
+        response_body_preview,
+    )
+}
+
 fn apply_local_proxy_body_overrides(
     body: &mut Value,
     overrides: &LocalProxyRequestOverrides,
@@ -3693,6 +3729,24 @@ mod tests {
         let summary = summarize_text_for_log("line1\n\n line2   line3", 12);
 
         assert_eq!(summary, "line1 line2...");
+    }
+
+    #[test]
+    fn format_upstream_error_diagnostic_includes_expected_fields() {
+        let diagnostic = format_upstream_error_diagnostic(
+            Some("gpt-5"),
+            "Claude",
+            Some("claude-3-7-sonnet"),
+            "/v1/messages",
+            400,
+            Some("bad request body"),
+        );
+
+        assert!(diagnostic.contains("incoming_model=gpt-5"));
+        assert!(diagnostic.contains("adapter=Claude"));
+        assert!(diagnostic.contains("outbound_model=claude-3-7-sonnet"));
+        assert!(diagnostic.contains("endpoint=/v1/messages"));
+        assert!(diagnostic.contains("response_body=bad request body"));
     }
 
     #[test]
