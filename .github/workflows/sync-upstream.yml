@@ -1,0 +1,84 @@
+name: Sync Upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  SYNC_TARGET_BRANCH: main
+  SYNC_WORK_BRANCH: chore/sync-upstream-from-farion1231
+
+concurrency:
+  group: sync-upstream-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/farion1231/cc-switch.git || true
+          git fetch upstream main
+
+      - name: Create sync branch
+        run: |
+          if git ls-remote --exit-code --heads origin "$SYNC_TARGET_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$SYNC_TARGET_BRANCH"
+            git checkout -B "$SYNC_WORK_BRANCH" "origin/$SYNC_TARGET_BRANCH"
+          else
+            git checkout -B "$SYNC_WORK_BRANCH"
+          fi
+
+      - name: Merge upstream main
+        run: |
+          git merge --no-edit upstream/main || true
+
+      - name: Run release channel guard
+        run: |
+          bash scripts/check-release-channel.sh
+
+      - name: Detect protected path touches
+        id: protected
+        run: |
+          git diff --name-only HEAD~1...HEAD | tee /tmp/protected-paths.txt
+          if grep -E '^(src-tauri/src/proxy/|src-tauri/tauri.conf.json|src-tauri/src/commands/misc.rs|\.github/|scripts/)' /tmp/protected-paths.txt; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git push --force-with-lease origin "$SYNC_WORK_BRANCH"
+
+          if [ "$(git rev-list --count "origin/$SYNC_TARGET_BRANCH..HEAD")" -eq 0 ]; then
+            echo "No commits to sync; skipping PR creation"
+            exit 0
+          fi
+
+          PR_NUMBER=$(gh pr list --repo JuntaoWu/cc-switch --head "$SYNC_WORK_BRANCH" --base "$SYNC_TARGET_BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr edit --repo JuntaoWu/cc-switch --base "$SYNC_TARGET_BRANCH" --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
+          else
+            gh pr create --repo JuntaoWu/cc-switch --base "$SYNC_TARGET_BRANCH" --head "$SYNC_WORK_BRANCH" --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
+          fi
