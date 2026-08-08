@@ -67,7 +67,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh pr view --json number --jq '.number' --repo JuntaoWu/cc-switch >/dev/null 2>&1; then
+          set -euo pipefail
+
+          git push --force-with-lease origin "$SYNC_WORK_BRANCH"
+
+          if [ "$(git rev-list --count "origin/$SYNC_TARGET_BRANCH..HEAD")" -eq 0 ]; then
+            echo "No commits to sync; skipping PR creation"
+            exit 0
+          fi
+
+          PR_NUMBER=$(gh pr list --repo JuntaoWu/cc-switch --head "$SYNC_WORK_BRANCH" --base "$SYNC_TARGET_BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$PR_NUMBER" ]; then
             gh pr edit --repo JuntaoWu/cc-switch --base "$SYNC_TARGET_BRANCH" --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
           else
             gh pr create --repo JuntaoWu/cc-switch --base "$SYNC_TARGET_BRANCH" --head "$SYNC_WORK_BRANCH" --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
