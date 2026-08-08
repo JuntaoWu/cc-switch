@@ -16,6 +16,8 @@
 
 English | [中文](README_ZH.md) | [日本語](README_JA.md) | [Deutsch](README_DE.md) | [Changelog](CHANGELOG.md)
 
+> Test note for workflow validation: this documentation change is intentionally minimal and is being used to trigger the release-branch PR flow for the tag automation test.
+
 </div>
 
 ## ❤️Sponsor
