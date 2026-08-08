@@ -29,14 +29,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION=$(python - <<'PY'
-import tomllib
-from pathlib import Path
-with Path('src-tauri/Cargo.toml').open('rb') as f:
-    data = tomllib.load(f)
-print(data['package']['version'])
-PY
-)
+          VERSION=$(python3 -c 'import tomllib, pathlib; print(tomllib.load(pathlib.Path("src-tauri/Cargo.toml").open("rb"))["package"]["version"])')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Create or update release tag
