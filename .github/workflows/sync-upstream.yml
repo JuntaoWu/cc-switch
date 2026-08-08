@@ -1,0 +1,65 @@
+name: Sync Upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/farion1231/cc-switch.git || true
+          git fetch upstream main
+
+      - name: Create sync branch
+        run: |
+          git checkout -B chore/sync-upstream-from-farion1231
+
+      - name: Merge upstream main
+        run: |
+          git merge --no-edit upstream/main || true
+
+      - name: Run release channel guard
+        run: |
+          bash scripts/check-release-channel.sh
+
+      - name: Detect protected path touches
+        id: protected
+        run: |
+          git diff --name-only HEAD~1...HEAD | tee /tmp/protected-paths.txt
+          if grep -E '^(src-tauri/src/proxy/|src-tauri/tauri.conf.json|src-tauri/src/commands/misc.rs|\.github/|scripts/)' /tmp/protected-paths.txt; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh pr view --json number --jq '.number' --repo JuntaoWu/cc-switch >/dev/null 2>&1; then
+            gh pr edit --repo JuntaoWu/cc-switch --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
+          else
+            gh pr create --repo JuntaoWu/cc-switch --base main --head chore/sync-upstream-from-farion1231 --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
+          fi
