@@ -122,6 +122,21 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      - name: Override version for fork release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [[ "$TAG_NAME" =~ ^v(.*)$ ]]; then
+            VERSION_SUFFIX="${BASH_REMATCH[1]}"
+          else
+            VERSION_SUFFIX="$TAG_NAME"
+          fi
+          VERSION_WITH_SUFFIX="${VERSION_SUFFIX}-fork.1"
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_WITH_SUFFIX=$VERSION_WITH_SUFFIX" >> "$GITHUB_ENV"
+          python3 -c 'from pathlib import Path; import re; p = Path("src-tauri/Cargo.toml"); t = p.read_text(encoding="utf-8"); pat = r"^(version\\s*=\\s*\")(.*)(\")"; m = re.match(pat, t, re.MULTILINE); new_version = f"{m.group(2)}-fork.1" if m else None; assert m, "Could not find version field in src-tauri/Cargo.toml"; p.write_text(re.sub(pat, lambda match: f"{match.group(1)}{new_version}{match.group(3)}", t, count=1, flags=re.MULTILINE), encoding="utf-8"); print(f"Updated Cargo.toml version to {new_version}")'
+
       - name: Prepare Tauri signing key
         shell: bash
         run: |
