@@ -9,6 +9,10 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  SYNC_TARGET_BRANCH: release/fork
+  SYNC_WORK_BRANCH: chore/sync-upstream-from-farion1231
+
 concurrency:
   group: sync-upstream-${{ github.ref }}
   cancel-in-progress: true
@@ -34,7 +38,12 @@ jobs:
 
       - name: Create sync branch
         run: |
-          git checkout -B chore/sync-upstream-from-farion1231
+          if git ls-remote --exit-code --heads origin "$SYNC_TARGET_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$SYNC_TARGET_BRANCH"
+            git checkout -B "$SYNC_WORK_BRANCH" "origin/$SYNC_TARGET_BRANCH"
+          else
+            git checkout -B "$SYNC_WORK_BRANCH"
+          fi
 
       - name: Merge upstream main
         run: |
@@ -59,7 +68,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh pr view --json number --jq '.number' --repo JuntaoWu/cc-switch >/dev/null 2>&1; then
-            gh pr edit --repo JuntaoWu/cc-switch --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
+            gh pr edit --repo JuntaoWu/cc-switch --base "$SYNC_TARGET_BRANCH" --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
           else
-            gh pr create --repo JuntaoWu/cc-switch --base main --head chore/sync-upstream-from-farion1231 --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
+            gh pr create --repo JuntaoWu/cc-switch --base "$SYNC_TARGET_BRANCH" --head "$SYNC_WORK_BRANCH" --title "chore: sync upstream" --body "Automated upstream sync for the fork-owned release and proxy customizations." || true
           fi
