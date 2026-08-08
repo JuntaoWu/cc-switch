@@ -122,10 +122,26 @@ fn is_warmup_request(body: &Value, has_anthropic_beta: bool, is_compact: bool) -
     if !has_anthropic_beta || is_compact {
         return false;
     }
+
+    if has_explicit_stop_controls(body) {
+        return false;
+    }
+
     // 无工具定义
     body.get("tools")
         .and_then(|tools| tools.as_array())
         .is_none_or(|tools| tools.is_empty())
+}
+
+fn has_explicit_stop_controls(body: &Value) -> bool {
+    let has_stop = body
+        .get("stop")
+        .is_some_and(|value| !value.is_null() && !value.as_array().is_some_and(Vec::is_empty));
+    let has_stop_sequences = body
+        .get("stop_sequences")
+        .is_some_and(|value| !value.is_null() && !value.as_array().is_some_and(Vec::is_empty));
+
+    has_stop || has_stop_sequences
 }
 
 /// 检测是否为 Claude Code 上下文压缩/compact 请求。
@@ -811,6 +827,32 @@ mod tests {
             ]
         });
         // 有 tools → 不是 warmup（即使有 anthropic-beta）
+        let result = classify_request(&body, true, true, false);
+        assert!(!result.is_warmup);
+    }
+
+    #[test]
+    fn test_not_warmup_when_stop_control_present() {
+        let body = json!({
+            "model": "claude-sonnet-4-20250514",
+            "stop": ["\n"],
+            "messages": [
+                {"role": "user", "content": "Hello"}
+            ]
+        });
+        let result = classify_request(&body, true, true, false);
+        assert!(!result.is_warmup);
+    }
+
+    #[test]
+    fn test_not_warmup_when_stop_sequences_present() {
+        let body = json!({
+            "model": "claude-sonnet-4-20250514",
+            "stop_sequences": ["\n"],
+            "messages": [
+                {"role": "user", "content": "Hello"}
+            ]
+        });
         let result = classify_request(&body, true, true, false);
         assert!(!result.is_warmup);
     }
