@@ -1,0 +1,53 @@
+name: Tag on merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - release/fork
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Derive tag from app version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(python - <<'PY'
+import tomllib
+from pathlib import Path
+with Path('src-tauri/Cargo.toml').open('rb') as f:
+    data = tomllib.load(f)
+print(data['package']['version'])
+PY
+)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG_NAME="v${VERSION}"
+          if git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null; then
+            echo "Tag ${TAG_NAME} already exists; skipping"
+            exit 0
+          fi
+          git tag "$TAG_NAME"
+          git push origin "$TAG_NAME"
