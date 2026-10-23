@@ -17,6 +17,7 @@ function stackOf(...modelIds: string[][]): ProxyStack {
       providerId: `p${index}`,
       modelIds: ids,
       route: index === 0,
+      memberModels: ids.length,
     })),
   };
 }
