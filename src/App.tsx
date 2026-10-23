@@ -1,9 +1,22 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, KeyRound, MoreHorizontal, Plus } from "lucide-react";
+import {
+  ExternalLink,
+  KeyRound,
+  MoreHorizontal,
+  Plus,
+  Search,
+} from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, VisibleApps } from "@/types";
 import { KNOWN_APP_TYPES, type AppTypeFilter } from "@/types/usage";
@@ -37,11 +50,12 @@ import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import {
   extractErrorMessage,
+  translateKimiProviderMutationError,
   translatePiProviderMutationError,
 } from "@/utils/errorUtils";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { deepClone } from "@/utils/deepClone";
-import { isLinux, isWindows } from "@/lib/platform";
+import { isLinux, isMac, isWindows } from "@/lib/platform";
 import {
   APP_STORAGE_KEY,
   appPageBelongsTo,
@@ -54,6 +68,7 @@ import {
   type View,
 } from "@/lib/navigation";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { useUpdate } from "@/contexts/UpdateContext";
 import { NewLayoutDialog } from "@/components/shell/NewLayoutDialog";
 import {
   AppPageHeader,
@@ -64,8 +79,14 @@ import { APP_DISPLAY_NAME, AppGlyph } from "@/components/shell/AppGlyph";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
+import {
+  hasOpencodeDefinition,
+  isNativeOpencodeConfig,
+} from "@/components/providers/forms/helpers/opencodeFormUtils";
 import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { OpenTerminalDialog } from "@/components/providers/OpenTerminalDialog";
+import { discardUnsavedChanges, hasUnsavedChanges } from "@/lib/unsavedChanges";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { AuthCenterPanel } from "@/components/settings/AuthCenterPanel";
 import { AppsPage } from "@/components/apps/AppsPage";
@@ -76,9 +97,8 @@ import {
 import { UsagePage } from "@/components/usage/UsagePage";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
 import { SwitchModePanel } from "@/components/providers/mode/SwitchModePanel";
-import { DesktopAccessBar } from "@/components/providers/mode/DesktopAccessBar";
 import { proxyApi } from "@/lib/api/proxy";
-import type { StartupAttachFailure } from "@/types/proxy";
+import type { AppMode, StartupAttachFailure } from "@/types/proxy";
 import UsageScriptModal from "@/components/UsageScriptModal";
 import UnifiedMcpPanel from "@/components/mcp/UnifiedMcpPanel";
 import PromptPanel from "@/components/prompts/PromptPanel";
@@ -86,6 +106,7 @@ import { PROMPT_APP_IDS } from "@/lib/query/prompts";
 import UnifiedSkillsPanel from "@/components/skills/UnifiedSkillsPanel";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { FirstRunNoticeDialog } from "@/components/FirstRunNoticeDialog";
+import { WhatsNewNotice } from "@/components/WhatsNewDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/hover-tip";
@@ -112,11 +133,7 @@ import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
 import HermesMemoryPanel, {
   HermesMemorySaveButton,
 } from "@/components/hermes/HermesMemoryPanel";
-import {
-  APP_IDS,
-  DEFAULT_VISIBLE_APPS,
-  isProxyAppId,
-} from "@/config/appConfig";
+import { APP_IDS, DEFAULT_VISIBLE_APPS, isModeAppId } from "@/config/appConfig";
 
 interface SyncStatusUpdatedPayload {
   source?: string;
@@ -137,12 +154,14 @@ const getInitialApp = (): AppId => {
 function App() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const { hasUpdate } = useUpdate();
 
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
   const sharedFeatureApp = sharedFeatureAppOf(activeApp);
   const [currentView, setCurrentView] = useState<View>(readStoredView);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("general");
+  const [appConfigScrollTarget, setAppConfigScrollTarget] = useState<AppId>();
   // 进设置前停留的页面：设置目录里的「← 返回」回到这里
   const settingsReturnViewRef = useRef<View>("providers");
   const [openclawConfigTab, setOpenclawConfigTab] =
@@ -151,6 +170,24 @@ function App() {
     PROMPT_APP_IDS.includes(sharedFeatureApp) ? sharedFeatureApp : "claude",
   );
   const [isAddOpen, setIsAddOpen] = useState(false);
+  // 供应商搜索面板：页头按钮和 ⌘F 都能打开；换应用或离开供应商页就收起
+  const [providerSearchOpen, setProviderSearchOpen] = useState(false);
+  const [connectionStatusSlot, setConnectionStatusSlot] =
+    useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setProviderSearchOpen(false);
+  }, [activeApp, currentView]);
+  // 供应商页顶部正在看的那格（直连 / 路由 / 聚合），由 SwitchModePanel 报上来。打开新增、
+  // 编辑时记下当时那格，表单按它选布局：在聚合那格打开就是聚合的简化表单。
+  const [providerModeView, setProviderModeView] = useState<{
+    app: AppId;
+    view: AppMode;
+  } | null>(null);
+  const [formModeView, setFormModeView] = useState<AppMode>();
+  const handleProviderModeViewChange = useCallback(
+    (app: AppId, view: AppMode) => setProviderModeView({ app, view }),
+    [],
+  );
   // 托盘里点了直连下需要路由的那家：打开应用页后弹「需要路由」对话框
   const [trayNeedsRoute, setTrayNeedsRoute] = useState<{
     app: AppId;
@@ -236,6 +273,9 @@ function App() {
     provider: Provider;
     action: "remove" | "delete";
   } | null>(null);
+  const [terminalProvider, setTerminalProvider] = useState<Provider | null>(
+    null,
+  );
   const [envConflicts, setEnvConflicts] = useState<EnvConflict[]>([]);
   const [showEnvBanner, setShowEnvBanner] = useState(false);
 
@@ -261,11 +301,17 @@ function App() {
   }, [activeApp, currentView]);
 
   const { isRunning: isProxyRunning, takeoverStatus } = useProxyStatus();
-  const proxyAppId = isProxyAppId(activeApp) ? activeApp : null;
-  const currentAppUsesProxy =
-    proxyAppId !== null || activeApp === "claude-desktop";
-  const isCurrentAppTakeoverActive = proxyAppId
-    ? takeoverStatus?.[proxyAppId] || false
+  const modeAppId = isModeAppId(activeApp) ? activeApp : null;
+  // 换了应用、新面板还没报上来时为 undefined：表单按应用实际生效的模式
+  const currentModeView =
+    providerModeView?.app === activeApp ? providerModeView.view : undefined;
+  const openAddProvider = (modeView: AppMode | undefined) => {
+    setFormModeView(modeView);
+    setIsAddOpen(true);
+  };
+  const currentAppUsesProxy = modeAppId !== null;
+  const isCurrentAppTakeoverActive = modeAppId
+    ? takeoverStatus?.[modeAppId] || false
     : false;
 
   const { data, isLoading, refetch } = useProvidersQuery(activeApp, {
@@ -319,6 +365,27 @@ function App() {
     }
   };
 
+  // Kimi「添加」只写进 config.toml、不改默认模型；「切换」走 switchProvider
+  const handleAddKimiProvider = async (provider: Provider) => {
+    try {
+      await providersApi.addToLiveConfig(provider.id, "kimi");
+    } catch (error) {
+      toast.error(
+        t("notifications.addFailed", {
+          error: extractErrorMessage(error) || t("common.unknown"),
+        }),
+        { closeButton: true },
+      );
+      return;
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ["providers", "kimi"] });
+    }
+    toast.success(
+      t("notifications.addToConfigSuccess", { defaultValue: "已添加到配置" }),
+      { closeButton: true },
+    );
+  };
+
   const disableOmoMutation = useDisableCurrentOmo();
   const handleDisableOmo = () => {
     disableOmoMutation.mutate(undefined, {
@@ -361,9 +428,11 @@ function App() {
       try {
         const off = await providersApi.onSwitched(
           async (event: ProviderSwitchEvent) => {
-            if (event.appType === activeApp) {
-              await refetch();
-            }
+            // 按前缀失效：故障转移只改路由指针，「路由中」标记读的是
+            // ["providers", app, "mode"]，只 refetch 列表会让它停在旧那家
+            await queryClient.invalidateQueries({
+              queryKey: ["providers", event.appType],
+            });
             if (event.appType === "pi") {
               await invalidatePiProviderCaches(queryClient);
             }
@@ -384,7 +453,7 @@ function App() {
       active = false;
       unsubscribe?.();
     };
-  }, [activeApp, queryClient, refetch]);
+  }, [queryClient]);
 
   useTauriEvent("universal-provider-synced", async () => {
     await queryClient.invalidateQueries({ queryKey: ["providers"] });
@@ -543,7 +612,12 @@ function App() {
   useEffect(() => {
     const checkEnvOnSwitch = async () => {
       try {
-        if (activeApp === "mcode") return;
+        if (
+          activeApp === "mcode" ||
+          activeApp === "kimi" ||
+          activeApp === "agy"
+        )
+          return;
         const conflicts = await checkEnvConflicts(activeApp);
 
         if (conflicts.length > 0) {
@@ -593,13 +667,26 @@ function App() {
     setUsageProvider(null);
   };
 
-  const openSettings = (section: SettingsSection = "general") => {
+  // 整页编辑器里有未保存的修改：先确认，确认放弃后再执行这次导航
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
+  const confirmLeave = (proceed: () => void) => {
+    if (!hasUnsavedChanges()) return false;
+    setPendingLeave(() => proceed);
+    return true;
+  };
+
+  const openSettings = (
+    section: SettingsSection = "general",
+    appConfigTarget?: AppId,
+  ) => {
     if (managementBusyRef.current) return;
+    if (confirmLeave(() => openSettings(section, appConfigTarget))) return;
     closeProviderPanels();
     if (currentViewRef.current !== "settings") {
       settingsReturnViewRef.current = currentViewRef.current;
     }
     setSettingsSection(section);
+    setAppConfigScrollTarget(appConfigTarget);
     setCurrentView("settings");
   };
 
@@ -609,6 +696,7 @@ function App() {
 
   const selectApp = (app: AppId) => {
     if (managementBusyRef.current) return;
+    if (confirmLeave(() => selectApp(app))) return;
     closeProviderPanels();
     setActiveApp(app);
     localStorage.setItem(APP_STORAGE_KEY, app);
@@ -621,6 +709,9 @@ function App() {
       return;
     }
     if (managementBusyRef.current) return;
+    // 再点当前页不会离开：不弹确认，也不能清掉编辑页的未保存登记
+    if (currentViewRef.current === page) return;
+    if (confirmLeave(() => openPage(page))) return;
     closeProviderPanels();
     if (page === "prompts" && currentViewRef.current !== "prompts") {
       // 提示词页默认选中侧栏里最后选的那个应用
@@ -633,24 +724,33 @@ function App() {
   useTrayAppPageSeen(currentView === "providers" ? activeApp : null);
 
   useTrayNavigation((navigation) => {
-    if (navigation.section) {
-      openSettings(navigation.section);
-      return;
-    }
-    if (!navigation.app) return;
-    selectApp(navigation.app);
-    if (navigation.intent === "add") setIsAddOpen(true);
-    if (navigation.intent === "needsRoute" && navigation.providerId) {
-      setTrayNeedsRoute({
-        app: navigation.app,
-        providerId: navigation.providerId,
-        nonce: Date.now(),
-      });
-    }
+    const navigate = () => {
+      if (navigation.section) {
+        openSettings(navigation.section);
+        return;
+      }
+      if (!navigation.app) return;
+      selectApp(navigation.app);
+      // 托盘先换应用：新应用那格还没报上来，按它实际生效的模式
+      if (navigation.intent === "add") openAddProvider(undefined);
+      if (navigation.intent === "needsRoute" && navigation.providerId) {
+        setTrayNeedsRoute({
+          app: navigation.app,
+          providerId: navigation.providerId,
+          nonce: Date.now(),
+        });
+      }
+    };
+    if (managementBusyRef.current || !confirmLeave(navigate)) navigate();
   });
 
   // 侧栏、⌘K 进用量统计看全部应用；只有应用页 ⋯ 进来时带应用筛选
   const openPageFromNav = (page: GlobalPage | "settings") => {
+    // 「设置」上的绿点说的是 CC Switch 有新版本，点进去直接到「关于」里的更新按钮
+    if (page === "settings" && hasUpdate) {
+      openSettings("about");
+      return;
+    }
     if (page === "usage") setUsageAppFilter("all");
     openPage(page);
   };
@@ -720,6 +820,35 @@ function App() {
     setEditingProvider(null);
   };
 
+  // 累加式应用的「已添加」和「默认」都现读客户端文件，移除前后重读一遍
+  const refreshAdditiveLiveState = async (app: AppId) => {
+    if (app === "pi") {
+      await invalidatePiProviderCaches(queryClient);
+    } else if (app === "opencode") {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["opencodeLiveProviderIds"],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["opencodeDefaultModel"] }),
+      ]);
+    } else if (app === "openclaw") {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: openclawKeys.liveProviderIds,
+        }),
+        queryClient.invalidateQueries({ queryKey: openclawKeys.defaultModel }),
+        queryClient.invalidateQueries({ queryKey: openclawKeys.health }),
+      ]);
+    } else if (app === "hermes") {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: hermesKeys.liveProviderIds }),
+        queryClient.invalidateQueries({ queryKey: hermesKeys.modelConfig }),
+      ]);
+    } else if (app === "mcode" || app === "kimi") {
+      await queryClient.invalidateQueries({ queryKey: ["providers", app] });
+    }
+  };
+
   const handleConfirmAction = async () => {
     if (!confirmAction) return;
     const { provider, action } = confirmAction;
@@ -732,42 +861,20 @@ function App() {
       } catch (error) {
         const detail = extractErrorMessage(error);
         const description =
-          activeApp === "pi"
-            ? translatePiProviderMutationError(detail, t) || detail
-            : detail;
-        if (activeApp === "pi") {
-          void invalidatePiProviderCaches(queryClient).catch(() => undefined);
-        }
+          (activeApp === "pi"
+            ? translatePiProviderMutationError(detail, t)
+            : activeApp === "kimi"
+              ? translateKimiProviderMutationError(detail, t)
+              : "") || detail;
+        // 默认模型可能在客户端里改过、页面还是旧的：失败了也重读，让「默认」和移除按钮跟上
+        void refreshAdditiveLiveState(activeApp).catch(() => undefined);
         toast.error(t("notifications.removeFromConfigFailed"), {
           description: description || t("common.unknown"),
           closeButton: true,
         });
         return;
       }
-      if (activeApp === "pi") {
-        await invalidatePiProviderCaches(queryClient);
-      }
-      // Invalidate queries to refresh the isInConfig state
-      if (activeApp === "opencode") {
-        await queryClient.invalidateQueries({
-          queryKey: ["opencodeLiveProviderIds"],
-        });
-      } else if (activeApp === "openclaw") {
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.liveProviderIds,
-        });
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.health,
-        });
-      } else if (activeApp === "hermes") {
-        await queryClient.invalidateQueries({
-          queryKey: hermesKeys.liveProviderIds,
-        });
-      } else if (activeApp === "mcode") {
-        await queryClient.invalidateQueries({
-          queryKey: ["providers", "mcode"],
-        });
-      }
+      await refreshAdditiveLiveState(activeApp);
       toast.success(
         activeApp === "pi"
           ? t("pi.provider.removed", {
@@ -811,16 +918,25 @@ function App() {
       provider.category !== "omo" &&
       provider.category !== "omo-slim"
     ) {
-      const { npm, models } = provider.settingsConfig;
+      // A copy gets a new ID, so it cannot inherit a built-in definition.
+      // Native V2 declarations name their package in `package`, not `npm`.
+      const isNative = isNativeOpencodeConfig(
+        JSON.stringify(provider.settingsConfig),
+        provider.meta?.opencodeConfigFormat,
+      );
       if (
-        typeof npm !== "string" ||
-        !npm.trim() ||
-        !models ||
-        typeof models !== "object" ||
-        Array.isArray(models) ||
-        Object.keys(models).length === 0
+        !hasOpencodeDefinition(
+          provider.settingsConfig,
+          isNative ? "package" : "npm",
+        )
       ) {
-        toast.error(t("opencode.duplicateRequiresDefinition"));
+        toast.error(
+          t(
+            isNative
+              ? "opencode.duplicateRequiresNativeDefinition"
+              : "opencode.duplicateRequiresDefinition",
+          ),
+        );
         return;
       }
     }
@@ -893,13 +1009,26 @@ function App() {
         existingKeys,
       );
       duplicatedProvider.addToLive = false;
-    } else if (activeApp === "mcode") {
+    } else if (activeApp === "mcode" || activeApp === "kimi") {
       // The MCode list already includes its live custom nodes; the backend
       // rejects a key that MCode itself owns.
       duplicatedProvider.providerKey = generateUniqueProviderCopyKey(
         provider.id,
         Object.keys(providers),
       );
+      if (activeApp === "kimi") {
+        const models = duplicatedProvider.settingsConfig.models ?? {};
+        duplicatedProvider.settingsConfig.models = Object.fromEntries(
+          Object.entries(models).map(([key, value]) => [
+            `${duplicatedProvider.providerKey}/${key.startsWith(`${provider.id}/`) ? key.slice(provider.id.length + 1) : key}`,
+            {
+              ...(value as Record<string, unknown>),
+              provider: duplicatedProvider.providerKey,
+            },
+          ]),
+        );
+        duplicatedProvider.addToLive = false;
+      }
     }
 
     if (provider.sortIndex !== undefined) {
@@ -952,32 +1081,6 @@ function App() {
       ? `${message}\n\n${t("confirm.piDefaultProviderWarning")}`
       : message;
   }, [activeApp, confirmAction, piCurrentState?.defaultProviderId, t]);
-
-  const handleOpenTerminal = async (provider: Provider) => {
-    try {
-      const selectedDir = await settingsApi.pickDirectory();
-      if (!selectedDir) {
-        return;
-      }
-
-      await providersApi.openTerminal(provider.id, activeApp, {
-        cwd: selectedDir,
-      });
-      toast.success(
-        t("provider.terminalOpened", {
-          defaultValue: "终端已打开",
-        }),
-      );
-    } catch (error) {
-      console.error("[App] Failed to open terminal", error);
-      const errorMessage = extractErrorMessage(error);
-      toast.error(
-        t("provider.terminalOpenFailed", {
-          defaultValue: "打开终端失败",
-        }) + (errorMessage ? `: ${errorMessage}` : ""),
-      );
-    }
-  };
 
   const handleImportSuccess = async () => {
     try {
@@ -1059,7 +1162,7 @@ function App() {
             {t("appPage.viewUsage")}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onSelect={() => openSettings("appConfig")}>
+        <DropdownMenuItem onSelect={() => openSettings("appConfig", activeApp)}>
           {t("appPage.configDirectory")}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => openPage("apps")}>
@@ -1083,15 +1186,26 @@ function App() {
         ? t("appPage.openclawConfig")
         : currentView === "hermesMemory"
           ? t("appPage.memory")
-          : t("appPage.providers");
+          : undefined;
 
   const renderAppPageHeader = () => (
     <AppPageHeader
       variant="app"
       icon={<AppGlyph app={activeApp} size={20} badgeClassName="bg-app" />}
       title={APP_DISPLAY_NAME[activeApp]}
+      truncateTitle={currentView === "providers" && Boolean(modeAppId)}
+      titleExtra={
+        currentView === "providers" && modeAppId ? (
+          <div
+            ref={setConnectionStatusSlot}
+            className="ms-2 flex min-w-0 max-w-[280px] items-center"
+          />
+        ) : undefined
+      }
       subtitle={
-        activeApp === "openclaw" || activeApp === "hermes"
+        activeApp === "openclaw" ||
+        activeApp === "hermes" ||
+        (currentView === "providers" && modeAppId)
           ? undefined
           : appPageName
       }
@@ -1099,7 +1213,8 @@ function App() {
         <>
           {currentView === "providers" &&
             activeApp !== "mcode" &&
-            (settingsData?.showProfileSwitcher ?? true) && (
+            activeApp !== "kimi" &&
+            (settingsData?.showProfileSwitcher ?? false) && (
               <ProfileSwitcher activeApp={activeApp} />
             )}
           {activeApp === "hermes" && (
@@ -1112,11 +1227,30 @@ function App() {
               <ExternalLink className="h-3.5 w-3.5" />
             </Button>
           )}
+          {currentView === "providers" &&
+            (settingsData?.showProviderSearch ?? true) && (
+              <HoverTip
+                content={t("provider.searchButtonTip", {
+                  shortcut: isMac() ? "⌘F" : "Ctrl+F",
+                })}
+              >
+                <Button
+                  variant="quiet"
+                  size="icon-compact"
+                  className="h-8 w-8"
+                  aria-label={t("provider.searchAriaLabel")}
+                  aria-pressed={providerSearchOpen}
+                  onClick={() => setProviderSearchOpen((open) => !open)}
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
+              </HoverTip>
+            )}
           {currentView === "providers" && (
             <Button
               variant="solid"
               size="regular"
-              onClick={() => setIsAddOpen(true)}
+              onClick={() => openAddProvider(currentModeView)}
             >
               <Plus className="h-4 w-4" />
               {t("provider.addProvider")}
@@ -1169,25 +1303,34 @@ function App() {
   };
 
   const listCallbacks = {
-    onEdit: (provider: Provider) => setEditingProvider(provider),
+    onEdit: (provider: Provider) => {
+      setFormModeView(currentModeView);
+      setEditingProvider(provider);
+    },
     onDelete: (provider: Provider) =>
       setConfirmAction({ provider, action: "delete" }),
     onDuplicate: handleDuplicateProvider,
     onConfigureUsage: setUsageProvider,
     onOpenWebsite: handleOpenWebsite,
-    onOpenTerminal: activeApp === "claude" ? handleOpenTerminal : undefined,
-    onCreate: () => setIsAddOpen(true),
+    onOpenTerminal:
+      activeApp === "claude" || activeApp === "agy"
+        ? setTerminalProvider
+        : undefined,
+    onCreate: () => openAddProvider(currentModeView),
+    searchOpen: providerSearchOpen,
+    onSearchOpenChange: setProviderSearchOpen,
   };
 
   const renderProviderList = () => {
-    if (proxyAppId) {
+    if (modeAppId) {
       const startupFailure = startupFailures.find(
-        (failure) => failure.appType === proxyAppId,
+        (failure) => failure.appType === modeAppId,
       );
       return (
         <SwitchModePanel
-          key={proxyAppId}
-          app={proxyAppId}
+          key={modeAppId}
+          app={modeAppId}
+          statusSlot={connectionStatusSlot}
           providers={providers}
           currentProviderId={currentProviderId}
           isLoading={isLoading}
@@ -1195,13 +1338,14 @@ function App() {
           onSwitch={switchProvider}
           onOpenRoutingSettings={() => openSettings("routing")}
           needsRouteRequest={
-            trayNeedsRoute?.app === proxyAppId ? trayNeedsRoute : undefined
+            trayNeedsRoute?.app === modeAppId ? trayNeedsRoute : undefined
           }
           onNeedsRouteHandled={() => setTrayNeedsRoute(null)}
+          onViewChange={handleProviderModeViewChange}
           startupFailure={startupFailure}
           onDismissStartupFailure={() =>
             setStartupFailures((list) =>
-              list.filter((failure) => failure.appType !== proxyAppId),
+              list.filter((failure) => failure.appType !== modeAppId),
             )
           }
           {...listCallbacks}
@@ -1216,12 +1360,6 @@ function App() {
         className="min-h-0 flex-1 overflow-y-auto scroll-stable overflow-x-hidden px-6 pb-12 pt-4"
       >
         <div className="space-y-4">
-          {activeApp === "claude-desktop" && (
-            <DesktopAccessBar
-              current={providers[currentProviderId]}
-              onOpenRoutingSettings={() => openSettings("routing")}
-            />
-          )}
           <ProviderList
             {...listCallbacks}
             providers={providers}
@@ -1231,14 +1369,17 @@ function App() {
             onSwitch={(provider) =>
               void (activeApp === "pi"
                 ? handleEnablePiProvider(provider)
-                : switchProvider(provider))
+                : activeApp === "kimi"
+                  ? handleAddKimiProvider(provider)
+                  : switchProvider(provider))
             }
             onRemoveFromConfig={
               activeApp === "opencode" ||
               activeApp === "openclaw" ||
               activeApp === "hermes" ||
               activeApp === "pi" ||
-              activeApp === "mcode"
+              activeApp === "mcode" ||
+              activeApp === "kimi"
                 ? (provider) => setConfirmAction({ provider, action: "remove" })
                 : undefined
             }
@@ -1249,10 +1390,10 @@ function App() {
               activeApp === "opencode" ? handleDisableOmoSlim : undefined
             }
             onSetAsDefault={
-              activeApp === "openclaw"
+              activeApp === "openclaw" || activeApp === "opencode"
                 ? (provider, modelId) =>
                     void setAsDefaultModel(provider, modelId)
-                : activeApp === "hermes"
+                : activeApp === "hermes" || activeApp === "kimi"
                   ? (provider) => void switchProvider(provider)
                   : undefined
             }
@@ -1422,6 +1563,7 @@ function App() {
       return (
         <SettingsPage
           section={settingsSection}
+          appConfigScrollTarget={appConfigScrollTarget}
           onImportSuccess={handleImportSuccess}
           onOpenApps={() => setCurrentView("apps")}
           onOpenApp={selectApp}
@@ -1443,7 +1585,10 @@ function App() {
           settingsSection={settingsSection}
           onSelectApp={selectApp}
           onSelectPage={openPageFromNav}
-          onSelectSettingsSection={setSettingsSection}
+          onSelectSettingsSection={(section) => {
+            setAppConfigScrollTarget(undefined);
+            setSettingsSection(section);
+          }}
           onExitSettings={exitSettings}
           appsUpdateAvailable={
             checkToolUpdatesOnStartup && toolUpdatesAvailable
@@ -1498,6 +1643,7 @@ function App() {
         onOpenChange={setIsAddOpen}
         appId={activeApp}
         onSubmit={addProvider}
+        modeView={formModeView}
       />
 
       <EditProviderDialog
@@ -1512,6 +1658,7 @@ function App() {
         appId={activeApp}
         isProxyTakeover={isCurrentAppTakeoverActive}
         isCurrent={effectiveEditingProvider?.id === currentProviderId}
+        modeView={formModeView}
       />
 
       {effectiveUsageProvider && (
@@ -1529,6 +1676,12 @@ function App() {
         />
       )}
 
+      <OpenTerminalDialog
+        provider={terminalProvider}
+        appId={activeApp}
+        onClose={() => setTerminalProvider(null)}
+      />
+
       <ConfirmDialog
         isOpen={Boolean(confirmAction)}
         title={
@@ -1541,6 +1694,22 @@ function App() {
         variant={confirmAction?.action === "remove" ? "info" : "destructive"}
         onConfirm={() => void handleConfirmAction()}
         onCancel={() => setConfirmAction(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={pendingLeave !== null}
+        title={t("common.unsavedLeaveTitle")}
+        message={t("common.unsavedLeaveMessage")}
+        confirmText={t("common.unsavedLeaveConfirm")}
+        cancelText={t("common.unsavedLeaveCancel")}
+        zIndex="top"
+        onConfirm={() => {
+          const proceed = pendingLeave;
+          setPendingLeave(null);
+          discardUnsavedChanges();
+          proceed?.();
+        }}
+        onCancel={() => setPendingLeave(null)}
       />
 
       <ConfirmDialog
@@ -1568,6 +1737,7 @@ function App() {
       <DeepLinkImportDialog />
       <FirstRunNoticeDialog />
       <NewLayoutDialog />
+      <WhatsNewNotice />
     </WindowControlsContext.Provider>
   );
 }

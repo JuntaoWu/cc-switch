@@ -272,7 +272,7 @@ export function UsageDateRangePicker({
           isEndLive
             ? "border-border bg-subtle cursor-not-allowed opacity-50"
             : isActive
-              ? "border-border-strong ring-1 ring-ring bg-surface cursor-pointer"
+              ? "border-ring ring-1 ring-ring bg-surface cursor-pointer"
               : "border-border hover:border-border cursor-pointer",
         )}
         onClick={() => {
@@ -286,7 +286,7 @@ export function UsageDateRangePicker({
           <Input
             type="date"
             className={cn(
-              "h-7 flex-1 border-0 bg-transparent p-0 text-body shadow-none focus-visible:ring-0",
+              "h-7 flex-1 border-0 bg-transparent p-0 text-body shadow-none focus:ring-0 focus-visible:ring-0",
               isEndLive && "pointer-events-none",
             )}
             value={fmtDate(ts)}
@@ -307,7 +307,7 @@ export function UsageDateRangePicker({
             type="time"
             step={60}
             className={cn(
-              "h-7 w-[90px] flex-none border-0 bg-transparent p-0 text-body shadow-none focus-visible:ring-0",
+              "h-7 w-[90px] flex-none border-0 bg-transparent p-0 text-body shadow-none focus:ring-0 focus-visible:ring-0",
               isEndLive && "pointer-events-none",
             )}
             value={fmtTime(ts)}
@@ -333,19 +333,20 @@ export function UsageDateRangePicker({
           type="button"
           variant="neutral"
           size="regular"
-          className="max-w-[220px] shrink-0 gap-1 pe-2 ps-3"
+          className="max-w-[220px] shrink-0 gap-1.5 pe-2 ps-2.5"
           title={`${t("usage.timeRange")}: ${triggerLabel}`}
         >
-          {selection.preset === "custom" && (
-            <CalendarDays className="h-3.5 w-3.5 shrink-0 text-fg-2" />
-          )}
+          <CalendarDays
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 text-fg-3"
+          />
           <span className="min-w-0 truncate">{triggerLabel}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-fg-2" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
         className="usage-range-popover w-[620px] max-w-[calc(100vw-2rem)] rounded-panel border-border bg-surface p-3 shadow-v7-md"
-        align="end"
+        align="start"
       >
         {/* Preset shortcuts */}
         <div className="flex flex-wrap gap-1.5 pb-2 border-b border-border">
@@ -371,7 +372,7 @@ export function UsageDateRangePicker({
           ))}
         </div>
 
-        <div className="usage-range-layout flex flex-col gap-3">
+        <div className="usage-range-layout mt-3 flex flex-col gap-3">
           {/* Left: date fields */}
           <div className="usage-range-fields space-y-2">
             <p className="text-caption text-fg-2">

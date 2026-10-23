@@ -23,6 +23,7 @@ vi.mock("@tauri-apps/api/app", () => ({
 }));
 
 import { NewLayoutDialog } from "@/components/shell/NewLayoutDialog";
+import { APP_IDS } from "@/config/appConfig";
 
 function renderDialog() {
   const client = new QueryClient({
@@ -61,8 +62,12 @@ describe("NewLayoutDialog", () => {
         screen.queryByText("newLayoutNotice.title"),
       ).not.toBeInTheDocument(),
     );
+    // 这个弹窗介绍的就是新版本，更新摘要一并记成已看，不会接着再弹一个
     expect(mocks.save).toHaveBeenCalledWith(
-      expect.objectContaining({ newLayoutNoticeConfirmed: true }),
+      expect.objectContaining({
+        newLayoutNoticeConfirmed: true,
+        whatsNewSeenVersion: "4.0.0",
+      }),
     );
   });
 
@@ -99,7 +104,9 @@ describe("NewLayoutDialog", () => {
   it("stays closed when no app has providers", async () => {
     mocks.getAll.mockResolvedValue({});
     renderDialog();
-    await waitFor(() => expect(mocks.getAll).toHaveBeenCalledTimes(10));
+    await waitFor(() =>
+      expect(mocks.getAll).toHaveBeenCalledTimes(APP_IDS.length),
+    );
     expect(screen.queryByText("newLayoutNotice.title")).not.toBeInTheDocument();
   });
 

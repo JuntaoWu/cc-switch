@@ -47,7 +47,7 @@ jobs:
 
       - name: Merge upstream main
         run: |
-          git merge --no-edit upstream/main || true
+          git merge --no-edit upstream/main
 
       - name: Run release channel guard
         run: |
@@ -56,7 +56,7 @@ jobs:
       - name: Detect protected path touches
         id: protected
         run: |
-          git diff --name-only HEAD~1...HEAD | tee /tmp/protected-paths.txt
+          git diff --name-only origin/$SYNC_TARGET_BRANCH...HEAD | tee /tmp/protected-paths.txt
           if grep -E '^(src-tauri/src/proxy/|src-tauri/tauri.conf.json|src-tauri/src/commands/misc.rs|\.github/|scripts/)' /tmp/protected-paths.txt; then
             echo "touched=true" >> "$GITHUB_OUTPUT"
           else
