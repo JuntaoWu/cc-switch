@@ -20,7 +20,7 @@ permissions:
 
 concurrency:
   # 带上事件名：手动干跑也能选 tag，和正式发布同组会把正在跑的发布取消掉
-  group: release-${{ github.event_name }}-${{ env.RELEASE_TAG }}
+  group: release-${{ github.event_name }}-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
