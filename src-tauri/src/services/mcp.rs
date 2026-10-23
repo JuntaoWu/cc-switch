@@ -35,14 +35,48 @@ impl McpService {
             .map(|s| s.apps.clone())
             .unwrap_or_default();
 
+        // MCode / Pi 的文件和数据库一起提交：任一步失败都恢复原样
+        let save_with_kimi = || {
+            if server.apps.kimi || prev_apps.kimi {
+                mcp::kimi::sync_and_commit(
+                    &server.id,
+                    server.apps.kimi.then_some(&server.server),
+                    || state.db.save_mcp_server(&server),
+                )
+            } else {
+                state.db.save_mcp_server(&server)
+            }
+        };
+        let save_with_agy = || {
+            if server.apps.agy || prev_apps.agy {
+                mcp::agy::sync_and_commit(
+                    &server.id,
+                    mcp::agy::AgyChange::from_enabled(server.apps.agy.then_some(&server.server)),
+                    save_with_kimi,
+                )
+            } else {
+                save_with_kimi()
+            }
+        };
+        let save_with_pi = || {
+            if server.apps.pi || prev_apps.pi {
+                mcp::pi::sync_and_commit(
+                    &server.id,
+                    mcp::pi::PiChange::from_enabled(server.apps.pi.then_some(&server.server)),
+                    save_with_agy,
+                )
+            } else {
+                save_with_agy()
+            }
+        };
         if server.apps.mcode || prev_apps.mcode {
             mcp::mcode::sync_and_commit(
                 &server.id,
                 server.apps.mcode.then_some(&server.server),
-                || state.db.save_mcp_server(&server),
+                save_with_pi,
             )?;
         } else {
-            state.db.save_mcp_server(&server)?;
+            save_with_pi()?;
         }
 
         // 处理禁用：若旧版本启用但新版本取消，则需要从该应用的 live 配置移除
@@ -76,10 +110,41 @@ impl McpService {
         let server = state.db.get_all_mcp_servers()?.shift_remove(id);
 
         if let Some(server) = server {
+            let delete_with_kimi = || {
+                if server.apps.kimi {
+                    mcp::kimi::sync_and_commit(id, None, || state.db.delete_mcp_server(id))
+                } else {
+                    state.db.delete_mcp_server(id)
+                }
+            };
+            let delete_with_agy = || {
+                if server.apps.agy {
+                    mcp::agy::sync_and_commit(id, mcp::agy::AgyChange::Remove, || {
+                        delete_with_kimi()
+                    })
+                } else {
+                    delete_with_kimi()
+                }
+            };
+            let delete_with_pi = || {
+                if server.apps.pi {
+                    mcp::pi::sync_and_commit(id, mcp::pi::PiChange::Remove, delete_with_agy)
+                } else {
+                    delete_with_agy()
+                }
+            };
             if server.apps.mcode {
-                mcp::mcode::sync_and_commit(id, None, || state.db.delete_mcp_server(id))?;
+                mcp::mcode::sync_and_commit(id, None, delete_with_pi)?;
             } else {
-                state.db.delete_mcp_server(id)?;
+                delete_with_pi()?;
+            }
+            // A false agy flag carries no ownership history. Even an identical disabled
+            // native entry may belong to the user; leave it intact without proof of ownership.
+            if !server.apps.pi {
+                // 取消勾选只在 Pi 里禁用、条目还留着：服务器删了就一并清掉（尽力而为）
+                if let Err(err) = mcp::pi::remove_disabled_if_managed(id, &server.server) {
+                    log::warn!("清理 Pi 中已禁用的 MCP 条目 '{id}' 失败: {err}");
+                }
             }
 
             // 从所有应用的 live 配置中移除
@@ -90,20 +155,56 @@ impl McpService {
         }
     }
 
-    /// 切换指定应用的启用状态
+    /// 命令入口用的 [`Self::toggle_app`]：先拿这个应用的切换锁再读改写 live 配置。
+    ///
+    /// 逐条写入是「读文件 → 改 → 写回」，并发的两次切换（批量勾选、和切换供应商或
+    /// 重新同步撞在一起）会互相覆盖、丢掉对方写的条目。和 `resync_mcp_to_apps` 用同一把
+    /// 锁。`toggle_app` 内部不拿这把锁（tokio 的锁不可重入），已经持锁的调用方直接调它。
+    pub async fn toggle_app_locked(
+        state: &AppState,
+        server_id: &str,
+        app: AppType,
+        enabled: bool,
+    ) -> Result<(), AppError> {
+        let _guard = state.proxy_service.lock_switch_for_app(app.as_str()).await;
+        Self::toggle_app(state, server_id, app, enabled)
+    }
+
+    /// 切换指定应用的启用状态。调用方负责先拿这个应用的切换锁（见 [`Self::toggle_app_locked`]）。
     pub fn toggle_app(
         state: &AppState,
         server_id: &str,
         app: AppType,
         enabled: bool,
     ) -> Result<(), AppError> {
-        if app == AppType::Mcode {
+        if matches!(
+            app,
+            AppType::Mcode | AppType::Kimi | AppType::Pi | AppType::Agy
+        ) {
             if let Some(server) = state.db.get_all_mcp_servers()?.get(server_id) {
-                mcp::mcode::sync_and_commit(server_id, enabled.then_some(&server.server), || {
+                let spec = enabled.then_some(&server.server);
+                let commit = || {
                     state
                         .db
                         .update_mcp_server_app_enabled(server_id, &app, enabled)
-                })?;
+                };
+                if app == AppType::Agy {
+                    mcp::agy::sync_and_commit(
+                        server_id,
+                        mcp::agy::AgyChange::from_enabled(spec),
+                        commit,
+                    )?;
+                } else if app == AppType::Kimi {
+                    mcp::kimi::sync_and_commit(server_id, spec, commit)?;
+                } else if app == AppType::Mcode {
+                    mcp::mcode::sync_and_commit(server_id, spec, commit)?;
+                } else {
+                    mcp::pi::sync_and_commit(
+                        server_id,
+                        mcp::pi::PiChange::from_enabled(spec),
+                        commit,
+                    )?;
+                }
             }
             return Ok(());
         }
@@ -125,7 +226,10 @@ impl McpService {
     /// 将 MCP 服务器同步到所有启用的应用
     fn sync_server_to_apps(_state: &AppState, server: &McpServer) -> Result<(), AppError> {
         for app in server.apps.enabled_apps() {
-            if app == AppType::Mcode {
+            if matches!(
+                app,
+                AppType::Mcode | AppType::Kimi | AppType::Pi | AppType::Agy
+            ) {
                 continue; // Already written before saving the managed state.
             }
             Self::sync_server_to_app_no_config(server, &app)?;
@@ -181,7 +285,9 @@ impl McpService {
                 mcp::sync_single_server_to_hermes(&Default::default(), &server.id, &server.server)?;
             }
             AppType::Mcode => mcp::mcode::sync(&server.id, Some(&server.server))?,
-            AppType::Pi => {}
+            AppType::Kimi => mcp::kimi::sync(&server.id, Some(&server.server))?,
+            AppType::Pi => mcp::pi::sync(&server.id, Some(&server.server))?,
+            AppType::Agy => mcp::agy::sync(&server.id, Some(&server.server))?,
         }
         Ok(())
     }
@@ -194,7 +300,10 @@ impl McpService {
     ) -> Result<(), AppError> {
         // 从所有曾启用的应用中移除
         for app in server.apps.enabled_apps() {
-            if app == AppType::Mcode {
+            if matches!(
+                app,
+                AppType::Mcode | AppType::Kimi | AppType::Pi | AppType::Agy
+            ) {
                 continue; // Already removed before deleting the managed record.
             }
             Self::remove_server_from_app(state, id, &app)?;
@@ -222,7 +331,9 @@ impl McpService {
                 mcp::remove_server_from_hermes(id)?;
             }
             AppType::Mcode => mcp::mcode::sync(id, None)?,
-            AppType::Pi => {}
+            AppType::Kimi => mcp::kimi::sync(id, None)?,
+            AppType::Pi => mcp::pi::sync(id, None)?,
+            AppType::Agy => mcp::agy::sync(id, None)?,
         }
         Ok(())
     }
@@ -262,15 +373,10 @@ impl McpService {
         Self::project_servers_to_app(state, &servers, app)
     }
 
-    /// 由 CC Switch 管理 MCP 的应用（Claude Desktop、OpenClaw、Pi 不支持）
+    /// 由 CC Switch 管理 MCP 的应用（Claude Desktop、OpenClaw 不支持）
     pub fn live_sync_apps() -> Vec<AppType> {
         AppType::all()
-            .filter(|app| {
-                !matches!(
-                    app,
-                    AppType::OpenClaw | AppType::ClaudeDesktop | AppType::Pi
-                )
-            })
+            .filter(|app| !matches!(app, AppType::OpenClaw | AppType::ClaudeDesktop))
             .collect()
     }
 
@@ -322,10 +428,7 @@ impl McpService {
         servers: &IndexMap<String, McpServer>,
         app: &AppType,
     ) -> Result<(), AppError> {
-        if matches!(
-            app,
-            AppType::OpenClaw | AppType::ClaudeDesktop | AppType::Pi
-        ) {
+        if matches!(app, AppType::OpenClaw | AppType::ClaudeDesktop) {
             return Ok(());
         }
 
@@ -336,10 +439,13 @@ impl McpService {
         for server in servers.values() {
             let result = if server.apps.is_enabled_for(app) {
                 Self::sync_server_to_app(state, server, app)
-            } else if !matches!(app, AppType::Mcode) {
+            } else if !matches!(
+                app,
+                AppType::Mcode | AppType::Kimi | AppType::Pi | AppType::Agy
+            ) {
                 Self::remove_server_from_app(state, &server.id, app)
             } else {
-                // MCode's false flag also covers pre-existing, unmanaged servers.
+                // MCode / Pi's false flag also covers pre-existing, unmanaged servers.
                 // Only explicit disable/delete operations may remove those entries.
                 Ok(())
             };
@@ -640,7 +746,7 @@ impl McpService {
         let mut total = 0;
         let mut failures: Vec<String> = Vec::new();
 
-        let results: [(&str, Result<usize, AppError>); 7] = [
+        let results: [(&str, Result<usize, AppError>); 10] = [
             ("claude", Self::import_from_claude(state)),
             ("codex", Self::import_from_codex(state)),
             ("gemini", Self::import_from_gemini(state)),
@@ -648,6 +754,9 @@ impl McpService {
             ("opencode", Self::import_from_opencode(state)),
             ("hermes", Self::import_from_hermes(state)),
             ("mcode", mcp::mcode::import(state)),
+            ("kimi", mcp::kimi::import(state)),
+            ("agy", mcp::agy::import(state)),
+            ("pi", mcp::pi::import(state)),
         ];
         for (app, result) in results {
             match result {

@@ -1,20 +1,20 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { ArrowDown } from "lucide-react";
 import { useProviderStats } from "@/lib/query/usage";
 import { TablePagination, useClientPagination } from "./TablePagination";
-import { HelpTip } from "@/components/ui/help-tip";
 import { cn } from "@/lib/utils";
 import {
   fmtInt,
-  fmtUsd,
   formatTokensCompact,
-  formatTokensPerSecond,
-  getAggregateTokensPerSecond,
   getLocaleFromLanguage,
   getResolvedLang,
 } from "./format";
 import { usageTable } from "./usageTable";
-import type { ProviderStats, UsageRangeSelection } from "@/types/usage";
+import { getUsageProviderLabel, usageProviderTitle } from "./providerLabel";
+import { PerformanceCells, PerformanceHeaders } from "./statsColumns";
+import type { UsageRangeSelection } from "@/types/usage";
+import { useMoneyFormat } from "@/hooks/useMoneyFormat";
 
 interface ProviderStatsTableProps {
   range: UsageRangeSelection;
@@ -22,26 +22,6 @@ interface ProviderStatsTableProps {
   providerName?: string;
   model?: string;
   refreshIntervalMs: number;
-}
-
-/** 一行供应商的汇总速度：Σ输出 ÷ Σ生成时间（后端只累加满足条件的请求）。 */
-export function getProviderSpeed(stat: ProviderStats): string | null {
-  return formatTokensPerSecond(
-    getAggregateTokensPerSecond(stat.speedOutputTokens, stat.speedGenerationMs),
-  );
-}
-
-/**
- * 会话日志导入的请求的汇总估算速度：Σ输出 ÷ Σ估算耗时（含首字等待）。
- * 没有精确速度时才拿它顶上，显示时前面带 ≈。
- */
-export function getProviderEstimatedSpeed(stat: ProviderStats): string | null {
-  return formatTokensPerSecond(
-    getAggregateTokensPerSecond(
-      stat.estSpeedOutputTokens,
-      stat.estSpeedDurationMs,
-    ),
-  );
 }
 
 export function ProviderStatsTable({
@@ -52,6 +32,7 @@ export function ProviderStatsTable({
   refreshIntervalMs,
 }: ProviderStatsTableProps) {
   const { t, i18n } = useTranslation();
+  const { money, moneyTitle } = useMoneyFormat();
   const locale = getLocaleFromLanguage(getResolvedLang(i18n));
   const { data: stats, isLoading } = useProviderStats(
     range,
@@ -78,92 +59,74 @@ export function ProviderStatsTable({
   return (
     <div className="flex flex-col">
       <div className={usageTable.scroller}>
+        {/* 和请求日志同一套列组与取宽：按内容取宽、至少铺满面板，放不下横向滚动 */}
         <table
-          className={cn(usageTable.table, "min-w-[620px]")}
+          className={cn(usageTable.table, "w-max min-w-full")}
           aria-label={t("usage.providerStats")}
         >
           <thead>
             <tr className={usageTable.headRow}>
               <th className={usageTable.th}>{t("usage.provider")}</th>
-              <th className={usageTable.thEnd}>{t("usage.requests")}</th>
-              <th className={usageTable.thEnd}>{t("usage.tokens")}</th>
-              <th className={usageTable.thEnd}>{t("usage.cost")}</th>
-              <th className={usageTable.thEnd}>{t("usage.successRate")}</th>
-              <th className={usageTable.thEnd}>
-                <span className="inline-flex items-center gap-0.5">
-                  {t("usage.speed")}
-                  <HelpTip title={t("usage.speedSumHelpTitle")} align="end">
-                    {t("usage.speedSumHelp")}
-                  </HelpTip>
+              {/* 按请求数从多到少排：箭头就是排序说明，不另写文字 */}
+              <th className={usageTable.th} aria-sort="descending">
+                <span className="inline-flex items-center gap-1">
+                  {t("usage.requests")}
+                  <ArrowDown
+                    aria-hidden="true"
+                    className="h-3 w-3 text-fg-3"
+                    strokeWidth={2}
+                  />
                 </span>
               </th>
+              <th className={cn(usageTable.th, usageTable.groupGap)}>
+                {t("usage.cost")}
+              </th>
+              <th className={cn(usageTable.th, usageTable.groupGap)}>
+                {t("usage.tokens")}
+              </th>
+              <PerformanceHeaders />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className={usageTable.empty}>
+                <td colSpan={7} className={usageTable.empty}>
                   {t("usage.noData")}
                 </td>
               </tr>
             ) : (
               pagination.pageRows.map((stat) => {
-                const exactSpeed = getProviderSpeed(stat);
-                const estimatedSpeed =
-                  exactSpeed == null ? getProviderEstimatedSpeed(stat) : null;
-                const speed = exactSpeed ?? estimatedSpeed;
+                const provider = getUsageProviderLabel(stat.providerName, t);
                 return (
                   <tr
-                    key={`${stat.providerId}:${stat.providerName}`}
+                    key={JSON.stringify([stat.appType, stat.providerId])}
                     className={usageTable.row}
                   >
                     <td className={usageTable.td}>
-                      <span
-                        className="block max-w-[260px] truncate"
-                        title={stat.providerName}
-                      >
-                        {stat.providerName}
+                      <span title={usageProviderTitle(provider)}>
+                        {provider.label}
                       </span>
                     </td>
-                    <td className={usageTable.tdEnd}>
+                    <td className={usageTable.td}>
                       {fmtInt(stat.requestCount, locale)}
                     </td>
                     <td
-                      className={usageTable.tdEnd}
+                      className={cn(
+                        usageTable.td,
+                        usageTable.groupGap,
+                        "font-medium",
+                      )}
+                      title={moneyTitle(stat.totalCost, 6)}
+                    >
+                      {money(stat.totalCost, 2)}
+                    </td>
+                    <td
+                      className={cn(usageTable.td, usageTable.groupGap)}
                       title={fmtInt(stat.totalTokens, locale)}
                     >
                       {formatTokensCompact(stat.totalTokens, locale)}
                     </td>
-                    <td
-                      className={cn(usageTable.tdEnd, "font-medium")}
-                      title={fmtUsd(stat.totalCost, 6)}
-                    >
-                      {fmtUsd(stat.totalCost, 2)}
-                    </td>
-                    <td className={usageTable.tdEnd}>
-                      {stat.successRate.toFixed(
-                        stat.successRate >= 99.95 ? 0 : 1,
-                      )}
-                      %
-                    </td>
-                    <td
-                      className={cn(
-                        usageTable.tdEnd,
-                        speed == null && usageTable.muted,
-                      )}
-                    >
-                      {speed == null ? (
-                        "—"
-                      ) : (
-                        <>
-                          {estimatedSpeed != null && "≈"}
-                          {speed}
-                          <span className="ms-0.5 text-badge font-normal text-fg-3">
-                            tok/s
-                          </span>
-                        </>
-                      )}
-                    </td>
+                    <PerformanceCells stat={stat} />
                   </tr>
                 );
               })
