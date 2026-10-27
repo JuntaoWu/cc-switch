@@ -212,6 +212,40 @@ fn claude_contract(
     (projection, contract)
 }
 
+/// Apply only explicit Aggregation role overrides on top of the existing
+/// Claude Code projection. This preserves Direct/Route mappings unchanged.
+/// Missing targets stay pinned: the proxy rejects an unpublished Stack ID
+/// rather than silently switching the request to another provider.
+fn apply_claude_role_overrides(
+    projection: &mut ClaudeProjection,
+    overrides: &std::collections::BTreeMap<String, String>,
+    published: &[StackModel],
+) {
+    for (role, suffix) in [
+        ("haiku", "HAIKU"),
+        ("sonnet", "SONNET"),
+        ("opus", "OPUS"),
+        ("fable", "FABLE"),
+    ] {
+        let Some(model_id) = overrides.get(role) else {
+            continue;
+        };
+        projection.env.insert(
+            format!("ANTHROPIC_DEFAULT_{suffix}_MODEL"),
+            Value::String(model_id.clone()),
+        );
+        let display_name = published
+            .iter()
+            .find(|model| model.id == *model_id)
+            .map(|model| model.name.as_str())
+            .unwrap_or("Unavailable aggregation model");
+        projection.env.insert(
+            format!("ANTHROPIC_DEFAULT_{suffix}_MODEL_NAME"),
+            Value::String(display_name.to_string()),
+        );
+    }
+}
+
 const CLAUDE_MAX_CONTEXT_ENV: &str = "CLAUDE_CODE_MAX_CONTEXT_TOKENS";
 
 /// `/model` 选择器的配置（顶层关键字段）。`replaceBuiltInOptions` 让选择器只剩 Default 和
@@ -406,13 +440,17 @@ async fn write_proxy(
                 .filter(|member| !member.route)
                 .map(|member| &member.provider)
                 .collect();
-            let (projection, contract) = claude_contract(
+            let (mut projection, mut contract) = claude_contract(
                 route,
                 &proxy_url,
                 &published,
                 stack_default.as_ref(),
                 &others,
             );
+            if stack.enabled && !stack.role_overrides.is_empty() {
+                apply_claude_role_overrides(&mut projection, &stack.role_overrides, &published);
+                contract = contract::claude(&projection);
+            }
             let unchanged = !force && live_now.has_contract(&contract.key);
             let mut patch = direct_patch(live_now.claude_exclusive_owner().as_ref(), &projection);
             crate::services::provider::claude_official::strip_from_patch(&mut patch);
@@ -1360,6 +1398,73 @@ async fn publish_stack(state: &AppState, app: &AppType, next: StackState) -> Res
     }
 }
 
+/// Update one role rather than replacing all four aliases. Reuse Stack's
+/// serialized publish path to persist the override and client contract together.
+pub async fn set_stack_role_override(
+    state: &AppState,
+    app: &AppType,
+    role: &str,
+    model_id: Option<&str>,
+) -> Result<(), StackWriteError> {
+    if !matches!(app, AppType::Claude)
+        || !matches!(role, "haiku" | "sonnet" | "opus" | "fable")
+    {
+        return Err(StackWriteError::unchanged("Invalid Claude Code Aggregation role"));
+    }
+    let _guard = lock_settled(state, app)
+        .await
+        .map_err(|error| StackWriteError::unchanged(error.to_string()))?;
+    if let Err(message) = set_stack_role_override_locked(state, app, role, model_id).await {
+        let partial = operation::pending_published(&DeviceStore::for_device(), app.as_str())
+            .unwrap_or_else(|error| {
+                log::warn!("读取 {} 的写前意图失败: {error}", app.as_str());
+                None
+            })
+            == Some(true);
+        return Err(StackWriteError { partial, message });
+    }
+    Ok(())
+}
+
+async fn set_stack_role_override_locked(
+    state: &AppState,
+    app: &AppType,
+    role: &str,
+    model_id: Option<&str>,
+) -> Result<(), String> {
+    let current = settled_stack(app)?;
+    if !current.enabled {
+        return Err("Claude Code Aggregation mode is not enabled".to_string());
+    }
+    if let Some(model_id) = model_id {
+        let mode = current::mode_state(app);
+        let members = stack::published_members(
+            &state.db,
+            app,
+            &current,
+            mode.proxy_route.as_deref(),
+        )
+        .map_err(err)?;
+        if !stack::claude_published(&members)
+            .iter()
+            .any(|model| model.id == model_id)
+        {
+            return Err(format!("Aggregation model is not published: {model_id}"));
+        }
+    }
+    let mut next = current.clone();
+    if let Some(model_id) = model_id {
+        next.role_overrides
+            .insert(role.to_string(), model_id.to_string());
+    } else {
+        next.role_overrides.remove(role);
+    }
+    if next == current {
+        return Ok(());
+    }
+    publish_stack(state, app, next).await
+}
+
 /// 拖动排序后让 Stack 名单跟界面顺序一致：名单顺序就是客户端看到的聚合模型顺序（Codex 的
 /// 模型目录等），界面「已添加」却按 `sort_index` 排。只重排已有成员，不增删；顺序没变就什么
 /// 都不写。不在库里的成员（理论上不会有）排到最后，保持原相对顺序。
@@ -1409,9 +1514,26 @@ pub fn stack_views(state: &AppState, app: &AppType) -> Result<StackView, String>
         AppType::Codex => codex_direct::stack_subagent_choices(&members),
         _ => Vec::new(),
     };
+    let role_choices = if matches!(app, AppType::Claude) && stack.enabled {
+        stack::claude_published(&members)
+            .into_iter()
+            .map(|model| stack::StackRoleChoice {
+                id: model.id,
+                display_name: model.display_name,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     Ok(StackView {
         active: mode.is_proxy() && stack.enabled,
         members: stack::member_views(app, &members),
+        role_overrides: if matches!(app, AppType::Claude) {
+            stack.role_overrides.clone()
+        } else {
+            Default::default()
+        },
+        role_choices,
         notice,
         notice_reasons,
         stale_clients: None,
