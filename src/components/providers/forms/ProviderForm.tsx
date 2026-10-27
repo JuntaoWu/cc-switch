@@ -438,7 +438,9 @@ function ProviderFormFull({
     setSelectedGitHubAccountId(
       resolveManagedAccountId(initialData?.meta, "github_copilot"),
     );
-    setCopilotWarmupDowngrade(initialData?.meta?.copilotWarmupDowngrade === true);
+    setCopilotWarmupDowngrade(
+      initialData?.meta?.copilotWarmupDowngrade === true,
+    );
     setCopilotWarmupModel(initialData?.meta?.copilotWarmupModel ?? "");
     setSelectedCodexAccountId(
       resolveManagedAccountId(initialData?.meta, "codex_oauth"),
