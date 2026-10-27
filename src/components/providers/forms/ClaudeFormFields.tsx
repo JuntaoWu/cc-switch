@@ -436,7 +436,7 @@ export function ClaudeFormFields({
     return model.supported_endpoints?.some((endpoint) =>
       expected.some(
         (path) =>
-          endpoint.split("?")[0].replace(/\\/$/, "").toLowerCase() === path,
+          endpoint.split("?")[0].replace(/[/]+$/, "").toLowerCase() === path,
       ),
     );
   });
