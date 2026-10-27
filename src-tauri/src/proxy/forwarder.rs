@@ -1589,17 +1589,18 @@ impl RequestForwarder {
                 let requested = mapped_body
                     .get("model")
                     .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let replacement = copilot_live_models.as_deref().and_then(|models| {
-                    available_copilot_warmup_model(
-                        &self.copilot_optimizer_config.warmup_model,
-                        requested,
-                        models,
-                    )
-                });
-                if let Some(model) = replacement {
-                    log::info!("[Copilot] Warmup model override: {requested} → {model}");
-                    mapped_body["model"] = Value::String(model.to_string());
+                    .unwrap_or_default()
+                    .to_string();
+                if apply_copilot_warmup_downgrade(
+                    &mut mapped_body,
+                    &self.copilot_optimizer_config,
+                    classification.is_warmup,
+                    copilot_live_models.as_deref(),
+                ) {
+                    log::info!(
+                        "[Copilot] Warmup model override: {requested} → {}",
+                        mapped_body["model"]
+                    );
                 } else {
                     log::debug!(
                         "[Copilot] Warmup override skipped (model unavailable or incompatible); keeping {requested}"
@@ -3950,6 +3951,29 @@ fn rewrite_codex_endpoint_for_copilot(
     (rewritten, passthrough_query)
 }
 
+/// Apply a warmup substitution only if explicitly enabled and verified against
+/// the live catalog. Caller must preserve the original model on all skip paths.
+fn apply_copilot_warmup_downgrade(
+    body: &mut Value,
+    config: &CopilotOptimizerConfig,
+    is_warmup: bool,
+    models: Option<&[CopilotModel]>,
+) -> bool {
+    if !config.warmup_downgrade || !is_warmup {
+        return false;
+    }
+    let Some(requested) = body.get("model").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(replacement) = models.and_then(|models| {
+        available_copilot_warmup_model(&config.warmup_model, requested, models)
+    }) else {
+        return false;
+    };
+    body["model"] = Value::String(replacement.to_string());
+    true
+}
+
 /// Only substitute an explicitly configured warmup model when the active
 /// Copilot account advertises that exact model *and* the protocol this
 /// forwarder will use for its vendor. No family fallback or hard-coded model.
@@ -4659,6 +4683,7 @@ mod tests {
     #[test]
     fn warmup_downgrade_defaults_off_for_new_and_missing_configs() {
         assert!(!CopilotOptimizerConfig::default().warmup_downgrade);
+        assert!(CopilotOptimizerConfig::default().warmup_model.is_empty());
         let settings: CopilotOptimizerConfig =
             serde_json::from_value(json!({"enabled": true})).unwrap();
         assert!(!settings.warmup_downgrade);
@@ -4706,6 +4731,55 @@ mod tests {
             available_copilot_warmup_model("claude-haiku-4.5", "gpt-6.1-sol", &catalog),
             Some("claude-haiku-4.5")
         );
+
+        // Test the full mutation seam: unsupported legacy downgrade must not
+        // change an otherwise valid requested model, even for a "warmup" prompt.
+        let mut config = CopilotOptimizerConfig {
+            warmup_downgrade: true,
+            warmup_model: "gpt-5-mini".into(),
+            ..Default::default()
+        };
+        let mut request = json!({"model": "gpt-6.1-sol"});
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            &config,
+            true,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            &config,
+            true,
+            None
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+
+        config.warmup_model = "gpt-6-luna".into();
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            &config,
+            false,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+        config.warmup_downgrade = false;
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            &config,
+            true,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+
+        config.warmup_downgrade = true;
+        assert!(apply_copilot_warmup_downgrade(
+            &mut request,
+            &config,
+            true,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6-luna");
     }
 
     #[test]
