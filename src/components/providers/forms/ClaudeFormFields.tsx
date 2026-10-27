@@ -441,6 +441,11 @@ export function ClaudeFormFields({
     );
   });
 
+  const warmupModelUnavailable =
+    !copilotWarmupModel ||
+    (copilotModels.length > 0 &&
+      !warmupCandidates.some((model) => model.id === copilotWarmupModel));
+
   const warmupSection = isCopilotPreset && (
     <Collapsible
       open={copilotWarmupExpanded}
@@ -519,10 +524,7 @@ export function ClaudeFormFields({
             )}
           </Button>
         </div>
-        {copilotWarmupDowngrade &&
-          (!copilotWarmupModel ||
-            (copilotModels.length > 0 &&
-              !warmupCandidates.some((model) => model.id === copilotWarmupModel))) && (
+        {copilotWarmupDowngrade && warmupModelUnavailable && (
             <p className="text-xs text-warning-text">
               {t("copilot.warmupMissing", {
                 defaultValue:
