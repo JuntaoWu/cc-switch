@@ -54,6 +54,7 @@ import {
 } from "./StackSubagentFields";
 import { RouteSettingsSheet } from "./RouteSettingsSheet";
 import { StackSettingsSheet } from "./StackSettingsSheet";
+import { RoleOverridesSheet } from "./RoleOverridesSheet";
 import { useDesktopConfigMessages } from "./useDesktopConfigMessages";
 
 type ListCallbacks = Pick<
@@ -154,6 +155,7 @@ export function SwitchModePanel({
   const [dialog, setDialog] = useState<ModeDialogState | null>(null);
   const [routeSettingsOpen, setRouteSettingsOpen] = useState(false);
   const [stackSettingsOpen, setStackSettingsOpen] = useState(false);
+  const [roleOverridesOpen, setRoleOverridesOpen] = useState(false);
   const [confirmFailover, setConfirmFailover] = useState(false);
   // 关掉的是哪一份提示（后端的 staleRevision）：目录或登录又变了就是新的一份，重新显示。
   const [staleDismissed, setStaleDismissed] = useState<string | null>(null);
@@ -599,8 +601,13 @@ export function SwitchModePanel({
             : undefined
         }
         onOpenStackSettings={
-          app === "codex" && view === "stack" && active === "stack"
-            ? () => setStackSettingsOpen(true)
+          (app === "codex" || app === "claude") &&
+          view === "stack" &&
+          active === "stack"
+            ? () =>
+                app === "claude"
+                  ? setRoleOverridesOpen(true)
+                  : setStackSettingsOpen(true)
             : undefined
         }
         searchSlotRef={setSearchSlot}
@@ -686,6 +693,13 @@ export function SwitchModePanel({
             (routeId === CODEX_OFFICIAL_PROVIDER_ID ||
               providers[routeId]?.category === "official")
           }
+        />
+      )}
+
+      {app === "claude" && (
+        <RoleOverridesSheet
+          open={roleOverridesOpen}
+          onOpenChange={setRoleOverridesOpen}
         />
       )}
 
