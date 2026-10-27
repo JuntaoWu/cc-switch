@@ -2111,6 +2111,53 @@ mod tests {
     }
 
     #[test]
+    fn stack_role_overrides_only_change_selected_roles_and_keep_missing_ids() {
+        let copilot = stack_member(
+            "github",
+            json!({
+                "ANTHROPIC_MODEL": "gpt-6.1-sol",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-6-luna"
+            }),
+        );
+        let google = stack_member(
+            "google",
+            json!({"ANTHROPIC_MODEL": "gemini-3.8-high"}),
+        );
+        let published: Vec<StackModel> = [&copilot, &google]
+            .into_iter()
+            .flat_map(|provider| stack::claude_models(&provider.id, provider))
+            .collect();
+        let (mut projection, _) = claude_contract(
+            &copilot,
+            "http://127.0.0.1:15721",
+            &published,
+            published.first(),
+            &[&google],
+        );
+        let original_sonnet = projection.env["ANTHROPIC_DEFAULT_SONNET_MODEL"].clone();
+        let mut overrides = std::collections::BTreeMap::new();
+        let luna = published
+            .iter()
+            .find(|model| model.upstream == "gpt-6-luna")
+            .unwrap();
+        overrides.insert("haiku".to_string(), luna.id.clone());
+        apply_claude_role_overrides(&mut projection, &overrides, &published);
+        assert_eq!(projection.env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], luna.id);
+        assert_eq!(projection.env["ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME"], "gpt-6-luna");
+        assert_eq!(projection.env["ANTHROPIC_DEFAULT_SONNET_MODEL"], original_sonnet);
+
+        // A removed member is never silently replaced by the default provider.
+        let removed_id = "ccs-claude-removed--model".to_string();
+        overrides.insert("haiku".to_string(), removed_id.clone());
+        apply_claude_role_overrides(&mut projection, &overrides, &published);
+        assert_eq!(projection.env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], removed_id);
+        assert_eq!(
+            projection.env["ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME"],
+            "Unavailable aggregation model"
+        );
+    }
+
+    #[test]
     fn stack_turns_off_a_feature_when_any_member_needs_it_off() {
         let route = stack_member("kimi", json!({ "ANTHROPIC_MODEL": "kimi-k3" }));
         let atlas = stack_member(
