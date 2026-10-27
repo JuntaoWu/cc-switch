@@ -27,7 +27,7 @@ use super::{
     ProxyError,
 };
 use crate::commands::{CodexOAuthState, CopilotAuthState, XaiOAuthState};
-use crate::proxy::providers::copilot_auth::{CopilotAuthError, CopilotAuthManager};
+use crate::proxy::providers::copilot_auth::{CopilotAuthError, CopilotAuthManager, CopilotModel};
 use crate::proxy::providers::copilot_model_map::{
     CopilotProtocol, CopilotTransport, ResolvedCopilotModel,
 };
@@ -1514,10 +1514,12 @@ impl RequestForwarder {
             super::providers::apply_codex_upstream_model(provider, &mut mapped_body);
         }
 
+        let mut copilot_live_models = None;
         if is_copilot_claude_body {
             mapped_body =
                 super::providers::copilot_model_map::apply_copilot_model_normalization(mapped_body);
-            self.apply_copilot_live_model_resolution(provider, &mut mapped_body)
+            copilot_live_models = self
+                .apply_copilot_live_model_resolution(provider, &mut mapped_body)
                 .await;
             // Strip the [1M] context marker after Copilot normalization/resolve.
             // A user's mapped value (e.g. "gpt-5.6-sol[1M]") carries [1M] as a
@@ -1579,14 +1581,30 @@ impl RequestForwarder {
                 mapped_body = super::copilot_optimizer::strip_thinking_blocks(mapped_body);
             }
 
-            // 4. Warmup 小模型降级
+            // 4. Warmup model substitution is an opt-in, catalog-validated optimization.
+            // "anthropic-beta + no tools" is only a heuristic and can match real requests.
+            // Never replace an explicitly mapped model with one that the active Copilot
+            // account cannot serve; missing/failed model discovery fails open.
             if self.copilot_optimizer_config.warmup_downgrade && classification.is_warmup {
-                log::info!(
-                    "[Copilot] Warmup 请求降级到模型: {}",
-                    self.copilot_optimizer_config.warmup_model
-                );
-                mapped_body["model"] =
-                    serde_json::json!(&self.copilot_optimizer_config.warmup_model);
+                let requested = mapped_body
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let replacement = copilot_live_models.as_deref().and_then(|models| {
+                    available_copilot_warmup_model(
+                        &self.copilot_optimizer_config.warmup_model,
+                        requested,
+                        models,
+                    )
+                });
+                if let Some(model) = replacement {
+                    log::info!("[Copilot] Warmup model override: {requested} → {model}");
+                    mapped_body["model"] = Value::String(model.to_string());
+                } else {
+                    log::debug!(
+                        "[Copilot] Warmup override skipped (model unavailable or incompatible); keeping {requested}"
+                    );
+                }
             }
 
             // 预计算确定性 Request ID（在 body 被 move 之前）
@@ -3201,14 +3219,14 @@ impl RequestForwarder {
         &self,
         provider: &Provider,
         body: &mut serde_json::Value,
-    ) {
+    ) -> Option<Vec<CopilotModel>> {
         let Some(model_id) = body.get("model").and_then(|v| v.as_str()) else {
-            return;
+            return None;
         };
         let model_id = model_id.to_string();
 
         let Some(app_handle) = &self.app_handle else {
-            return;
+            return None;
         };
         let copilot_state = app_handle.state::<CopilotAuthState>();
         let copilot_auth = copilot_state.0.read().await;
@@ -3226,7 +3244,7 @@ impl RequestForwarder {
             Ok(m) => m,
             Err(err) => {
                 log::debug!("[Copilot] live model list unavailable, skip resolution: {err}");
-                return;
+                return None;
             }
         };
 
@@ -3236,6 +3254,7 @@ impl RequestForwarder {
             log::info!("[Copilot] live-model resolve: {model_id} → {resolved}");
             body["model"] = serde_json::Value::String(resolved);
         }
+        Some(models)
     }
 
     async fn resolve_codex_copilot_model(
@@ -3931,6 +3950,42 @@ fn rewrite_codex_endpoint_for_copilot(
     (rewritten, passthrough_query)
 }
 
+/// Only substitute an explicitly configured warmup model when the active
+/// Copilot account advertises that exact model *and* the protocol this
+/// forwarder will use for its vendor. No family fallback or hard-coded model.
+fn available_copilot_warmup_model<'a>(
+    configured: &str,
+    requested: &str,
+    models: &'a [CopilotModel],
+) -> Option<&'a str> {
+    let configured = configured.trim();
+    if configured.is_empty() || configured.eq_ignore_ascii_case(requested) {
+        return None;
+    }
+
+    models
+        .iter()
+        .find(|model| {
+            if !model.model_picker_enabled || !model.id.eq_ignore_ascii_case(configured) {
+                return false;
+            }
+            let endpoints: &[&str] =
+                if copilot_api_format_for_vendor(Some(&model.vendor)) == "openai_responses" {
+                    &["/responses", "/v1/responses"]
+                } else {
+                    &["/chat/completions", "/v1/chat/completions"]
+                };
+            model.supported_endpoints.iter().any(|endpoint| {
+                let path = endpoint
+                    .split_once('?')
+                    .map_or(endpoint.as_str(), |(path, _)| path)
+                    .trim_end_matches('/');
+                endpoints.iter().any(|supported| path.eq_ignore_ascii_case(supported))
+            })
+        })
+        .map(|model| model.id.as_str())
+}
+
 fn copilot_api_format_for_vendor(vendor: Option<&str>) -> &'static str {
     if vendor.is_some_and(|vendor| vendor.eq_ignore_ascii_case("openai")) {
         "openai_responses"
@@ -4600,6 +4655,58 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
     use std::time::Duration;
+
+    #[test]
+    fn warmup_downgrade_defaults_off_for_new_and_missing_configs() {
+        assert!(!CopilotOptimizerConfig::default().warmup_downgrade);
+        let settings: CopilotOptimizerConfig =
+            serde_json::from_value(json!({"enabled": true})).unwrap();
+        assert!(!settings.warmup_downgrade);
+        // Legacy opt-in remains readable; runtime validation still prevents invalid models.
+        let legacy: CopilotOptimizerConfig =
+            serde_json::from_value(json!({"warmupDowngrade": true})).unwrap();
+        assert!(legacy.warmup_downgrade);
+    }
+
+    #[test]
+    fn warmup_downgrade_requires_exact_model_in_active_copilot_catalog() {
+        let model = |id: &str, vendor: &str, picker: bool, endpoints: &[&str]| CopilotModel {
+            id: id.into(),
+            name: id.into(),
+            vendor: vendor.into(),
+            model_picker_enabled: picker,
+            context_window: None,
+            supported_endpoints: endpoints.iter().map(|s| (*s).to_string()).collect(),
+            supports_parallel_tool_calls: None,
+            reasoning_effort: None,
+        };
+
+        let catalog = [
+            model("gpt-6.1-sol", "OpenAI", true, &["/v1/responses"]),
+            model("gpt-6-luna", "OpenAI", true, &["/responses"]),
+            model("claude-haiku-4.5", "Anthropic", true, &["/chat/completions"]),
+            model("hidden-mini", "OpenAI", false, &["/responses"]),
+            model("chat-only-gpt", "OpenAI", true, &["/chat/completions"]),
+        ];
+
+        // Reproduces the reported failure: the old hard-coded mini is absent.
+        assert_eq!(available_copilot_warmup_model("gpt-5-mini", "gpt-6.1-sol", &catalog), None);
+        assert_eq!(available_copilot_warmup_model("gpt-6-luna", "gpt-6.1-sol", &[]), None);
+        assert_eq!(available_copilot_warmup_model("", "gpt-6.1-sol", &catalog), None);
+        assert_eq!(available_copilot_warmup_model("gpt-6.1-sol", "gpt-6.1-sol", &catalog), None);
+        assert_eq!(available_copilot_warmup_model("hidden-mini", "gpt-6.1-sol", &catalog), None);
+        assert_eq!(available_copilot_warmup_model("chat-only-gpt", "gpt-6.1-sol", &catalog), None);
+
+        // A selected account can opt into a real available replacement.
+        assert_eq!(
+            available_copilot_warmup_model("GPT-6-LUNA", "gpt-6.1-sol", &catalog),
+            Some("gpt-6-luna")
+        );
+        assert_eq!(
+            available_copilot_warmup_model("claude-haiku-4.5", "gpt-6.1-sol", &catalog),
+            Some("claude-haiku-4.5")
+        );
+    }
 
     #[test]
     fn opencode_upstream_host_matching() {
