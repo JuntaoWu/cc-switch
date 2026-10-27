@@ -3229,10 +3229,7 @@ impl RequestForwarder {
         provider: &Provider,
         body: &mut serde_json::Value,
     ) -> Option<Vec<CopilotModel>> {
-        let Some(model_id) = body.get("model").and_then(|v| v.as_str()) else {
-            return None;
-        };
-        let model_id = model_id.to_string();
+        let model_id = body.get("model").and_then(|v| v.as_str())?.to_string();
 
         let Some(app_handle) = &self.app_handle else {
             return None;
