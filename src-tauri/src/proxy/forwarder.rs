@@ -1588,7 +1588,10 @@ impl RequestForwarder {
             // "anthropic-beta + no tools" is only a heuristic and can match real requests.
             // Never replace an explicitly mapped model with one that the active Copilot
             // account cannot serve; missing/failed model discovery fails open.
-            if provider.meta.as_ref().is_some_and(|meta| meta.copilot_warmup_downgrade == Some(true))
+            if provider
+                .meta
+                .as_ref()
+                .is_some_and(|meta| meta.copilot_warmup_downgrade == Some(true))
                 && classification.is_warmup
             {
                 let requested = mapped_body
@@ -4785,7 +4788,12 @@ mod tests {
             Some(&catalog)
         ));
         assert_eq!(request["model"], "gpt-6.1-sol");
-        assert!(!apply_copilot_warmup_downgrade(&mut request, Some(&meta), true, None));
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            Some(&meta),
+            true,
+            None
+        ));
         assert_eq!(request["model"], "gpt-6.1-sol");
 
         meta.copilot_warmup_model = Some("gpt-6-luna".into());
