@@ -541,6 +541,13 @@ pub struct ProviderMeta {
         skip_serializing_if = "Option::is_none"
     )]
     pub codex_copilot_api_format: Option<String>,
+    /// Per-provider Copilot warmup optimization (Claude Code only). Absent means disabled.
+    /// Global optimizer warmup fields are intentionally not used for routing.
+    #[serde(rename = "copilotWarmupDowngrade", skip_serializing_if = "Option::is_none")]
+    pub copilot_warmup_downgrade: Option<bool>,
+    /// Exact Copilot account model ID used only when the optional downgrade is enabled.
+    #[serde(rename = "copilotWarmupModel", skip_serializing_if = "Option::is_none")]
+    pub copilot_warmup_model: Option<String>,
     /// 通用认证绑定（provider_config / managed_account）
     ///
     /// 新代码应只写入该字段；githubAccountId 仅保留兼容读取。
