@@ -27,14 +27,14 @@ use super::{
     ProxyError,
 };
 use crate::commands::{CodexOAuthState, CopilotAuthState, XaiOAuthState};
-use crate::proxy::providers::copilot_auth::{CopilotAuthError, CopilotAuthManager};
+use crate::proxy::providers::copilot_auth::{CopilotAuthError, CopilotAuthManager, CopilotModel};
 use crate::proxy::providers::copilot_model_map::{
     CopilotProtocol, CopilotTransport, ResolvedCopilotModel,
 };
 use crate::proxy::providers::xai_oauth_auth::XaiOAuthManager;
 use crate::{
     app_config::AppType,
-    provider::{CodexCopilotApiFormat, LocalProxyRequestOverrides, Provider},
+    provider::{CodexCopilotApiFormat, LocalProxyRequestOverrides, Provider, ProviderMeta},
 };
 use bytes::Bytes;
 use futures::StreamExt;
@@ -1514,10 +1514,11 @@ impl RequestForwarder {
             super::providers::apply_codex_upstream_model(provider, &mut mapped_body);
         }
 
-        if is_copilot_claude_body {
+        let copilot_live_models = if is_copilot_claude_body {
             mapped_body =
                 super::providers::copilot_model_map::apply_copilot_model_normalization(mapped_body);
-            self.apply_copilot_live_model_resolution(provider, &mut mapped_body)
+            let models = self
+                .apply_copilot_live_model_resolution(provider, &mut mapped_body)
                 .await;
             // Strip the [1M] context marker after Copilot normalization/resolve.
             // A user's mapped value (e.g. "gpt-5.6-sol[1M]") carries [1M] as a
@@ -1528,6 +1529,7 @@ impl RequestForwarder {
             // variants pass through unchanged.
             mapped_body =
                 super::model_mapper::strip_one_m_suffix_for_upstream_from_body(mapped_body);
+            models
         } else if !is_copilot_codex_responses && !codex_responses_to_anthropic {
             // Skip on the Codex→Anthropic path: stripping [1m] here would break both the
             // model-catalog match (apply_codex_upstream_model) and the transform's own
@@ -1535,7 +1537,10 @@ impl RequestForwarder {
             // final anthropic_body.
             mapped_body =
                 super::model_mapper::strip_one_m_suffix_for_upstream_from_body(mapped_body);
-        }
+            None
+        } else {
+            None
+        };
 
         // --- Copilot 优化器：分类 + 请求体优化（在格式转换之前执行） ---
         // 注意：确定性 ID 也在此处计算，因为 mapped_body 在格式转换时会被 move
@@ -1579,14 +1584,36 @@ impl RequestForwarder {
                 mapped_body = super::copilot_optimizer::strip_thinking_blocks(mapped_body);
             }
 
-            // 4. Warmup 小模型降级
-            if self.copilot_optimizer_config.warmup_downgrade && classification.is_warmup {
-                log::info!(
-                    "[Copilot] Warmup 请求降级到模型: {}",
-                    self.copilot_optimizer_config.warmup_model
-                );
-                mapped_body["model"] =
-                    serde_json::json!(&self.copilot_optimizer_config.warmup_model);
+            // 4. Warmup model substitution is an opt-in, catalog-validated optimization.
+            // "anthropic-beta + no tools" is only a heuristic and can match real requests.
+            // Never replace an explicitly mapped model with one that the active Copilot
+            // account cannot serve; missing/failed model discovery fails open.
+            if provider
+                .meta
+                .as_ref()
+                .is_some_and(|meta| meta.copilot_warmup_downgrade == Some(true))
+                && classification.is_warmup
+            {
+                let requested = mapped_body
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                if apply_copilot_warmup_downgrade(
+                    &mut mapped_body,
+                    provider.meta.as_ref(),
+                    classification.is_warmup,
+                    copilot_live_models.as_deref(),
+                ) {
+                    log::info!(
+                        "[Copilot] Warmup model override: {requested} → {}",
+                        mapped_body["model"]
+                    );
+                } else {
+                    log::debug!(
+                        "[Copilot] Warmup override skipped (model unavailable or incompatible); keeping {requested}"
+                    );
+                }
             }
 
             // 预计算确定性 Request ID（在 body 被 move 之前）
@@ -3201,14 +3228,11 @@ impl RequestForwarder {
         &self,
         provider: &Provider,
         body: &mut serde_json::Value,
-    ) {
-        let Some(model_id) = body.get("model").and_then(|v| v.as_str()) else {
-            return;
-        };
-        let model_id = model_id.to_string();
+    ) -> Option<Vec<CopilotModel>> {
+        let model_id = body.get("model").and_then(|v| v.as_str())?.to_string();
 
         let Some(app_handle) = &self.app_handle else {
-            return;
+            return None;
         };
         let copilot_state = app_handle.state::<CopilotAuthState>();
         let copilot_auth = copilot_state.0.read().await;
@@ -3226,7 +3250,7 @@ impl RequestForwarder {
             Ok(m) => m,
             Err(err) => {
                 log::debug!("[Copilot] live model list unavailable, skip resolution: {err}");
-                return;
+                return None;
             }
         };
 
@@ -3236,6 +3260,7 @@ impl RequestForwarder {
             log::info!("[Copilot] live-model resolve: {model_id} → {resolved}");
             body["model"] = serde_json::Value::String(resolved);
         }
+        Some(models)
     }
 
     async fn resolve_codex_copilot_model(
@@ -3931,6 +3956,70 @@ fn rewrite_codex_endpoint_for_copilot(
     (rewritten, passthrough_query)
 }
 
+/// Per-provider metadata is the only warmup selection authority. Older global
+/// copilot_optimizer_config warmup fields remain deserializable but are ignored.
+fn apply_copilot_warmup_downgrade(
+    body: &mut Value,
+    meta: Option<&ProviderMeta>,
+    is_warmup: bool,
+    models: Option<&[CopilotModel]>,
+) -> bool {
+    let Some(model) = meta
+        .filter(|meta| meta.copilot_warmup_downgrade == Some(true) && is_warmup)
+        .and_then(|meta| meta.copilot_warmup_model.as_deref())
+    else {
+        return false;
+    };
+    let Some(requested) = body.get("model").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(replacement) =
+        models.and_then(|models| available_copilot_warmup_model(model, requested, models))
+    else {
+        return false;
+    };
+    body["model"] = Value::String(replacement.to_string());
+    true
+}
+
+/// Only substitute an explicitly configured warmup model when the active
+/// Copilot account advertises that exact model *and* the protocol this
+/// forwarder will use for its vendor. No family fallback or hard-coded model.
+fn available_copilot_warmup_model<'a>(
+    configured: &str,
+    requested: &str,
+    models: &'a [CopilotModel],
+) -> Option<&'a str> {
+    let configured = configured.trim();
+    if configured.is_empty() || configured.eq_ignore_ascii_case(requested) {
+        return None;
+    }
+
+    models
+        .iter()
+        .find(|model| {
+            if !model.model_picker_enabled || !model.id.eq_ignore_ascii_case(configured) {
+                return false;
+            }
+            let endpoints: &[&str] =
+                if copilot_api_format_for_vendor(Some(&model.vendor)) == "openai_responses" {
+                    &["/responses", "/v1/responses"]
+                } else {
+                    &["/chat/completions", "/v1/chat/completions"]
+                };
+            model.supported_endpoints.iter().any(|endpoint| {
+                let path = endpoint
+                    .split_once('?')
+                    .map_or(endpoint.as_str(), |(path, _)| path)
+                    .trim_end_matches('/');
+                endpoints
+                    .iter()
+                    .any(|supported| path.eq_ignore_ascii_case(supported))
+            })
+        })
+        .map(|model| model.id.as_str())
+}
+
 fn copilot_api_format_for_vendor(vendor: Option<&str>) -> &'static str {
     if vendor.is_some_and(|vendor| vendor.eq_ignore_ascii_case("openai")) {
         "openai_responses"
@@ -4600,6 +4689,143 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
     use std::time::Duration;
+
+    #[test]
+    fn warmup_downgrade_defaults_off_for_new_and_missing_configs() {
+        assert!(!CopilotOptimizerConfig::default().warmup_downgrade);
+        assert!(CopilotOptimizerConfig::default().warmup_model.is_empty());
+        let settings: CopilotOptimizerConfig =
+            serde_json::from_value(json!({"enabled": true})).unwrap();
+        assert!(!settings.warmup_downgrade);
+        // Legacy opt-in remains readable; runtime validation still prevents invalid models.
+        let legacy: CopilotOptimizerConfig =
+            serde_json::from_value(json!({"warmupDowngrade": true})).unwrap();
+        assert!(legacy.warmup_downgrade);
+    }
+
+    #[test]
+    fn warmup_downgrade_requires_exact_model_in_active_copilot_catalog() {
+        let model = |id: &str, vendor: &str, picker: bool, endpoints: &[&str]| CopilotModel {
+            id: id.into(),
+            name: id.into(),
+            vendor: vendor.into(),
+            model_picker_enabled: picker,
+            context_window: None,
+            supported_endpoints: endpoints.iter().map(|s| (*s).to_string()).collect(),
+            supports_parallel_tool_calls: None,
+            reasoning_effort: None,
+        };
+
+        let catalog = [
+            model("gpt-6.1-sol", "OpenAI", true, &["/v1/responses"]),
+            model("gpt-6-luna", "OpenAI", true, &["/responses"]),
+            model(
+                "claude-haiku-4.5",
+                "Anthropic",
+                true,
+                &["/chat/completions"],
+            ),
+            model("hidden-mini", "OpenAI", false, &["/responses"]),
+            model("chat-only-gpt", "OpenAI", true, &["/chat/completions"]),
+        ];
+
+        // Reproduces the reported failure: the old hard-coded mini is absent.
+        assert_eq!(
+            available_copilot_warmup_model("gpt-5-mini", "gpt-6.1-sol", &catalog),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("gpt-6-luna", "gpt-6.1-sol", &[]),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("", "gpt-6.1-sol", &catalog),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("gpt-6.1-sol", "gpt-6.1-sol", &catalog),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("hidden-mini", "gpt-6.1-sol", &catalog),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("chat-only-gpt", "gpt-6.1-sol", &catalog),
+            None
+        );
+
+        // A selected account can opt into a real available replacement.
+        assert_eq!(
+            available_copilot_warmup_model("GPT-6-LUNA", "gpt-6.1-sol", &catalog),
+            Some("gpt-6-luna")
+        );
+        assert_eq!(
+            available_copilot_warmup_model("claude-haiku-4.5", "gpt-6.1-sol", &catalog),
+            Some("claude-haiku-4.5")
+        );
+
+        // Legacy global config is never consulted, even when it enables a missing model.
+        let global = CopilotOptimizerConfig {
+            warmup_downgrade: true,
+            warmup_model: "gpt-5-mini".into(),
+            ..Default::default()
+        };
+        assert!(global.warmup_downgrade);
+        let mut meta = ProviderMeta {
+            copilot_warmup_downgrade: Some(true),
+            copilot_warmup_model: Some("gpt-5-mini".into()),
+            ..Default::default()
+        };
+        let mut request = json!({"model": "gpt-6.1-sol"});
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            Some(&meta),
+            true,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            Some(&meta),
+            true,
+            None
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+
+        meta.copilot_warmup_model = Some("gpt-6-luna".into());
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            Some(&meta),
+            false,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+        meta.copilot_warmup_downgrade = None;
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            Some(&meta),
+            true,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            None,
+            true,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+
+        meta.copilot_warmup_downgrade = Some(true);
+        assert!(apply_copilot_warmup_downgrade(
+            &mut request,
+            Some(&meta),
+            true,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6-luna");
+    }
 
     #[test]
     fn opencode_upstream_host_matching() {

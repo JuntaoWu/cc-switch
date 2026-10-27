@@ -296,10 +296,11 @@ pub struct CopilotOptimizerConfig {
     /// 设置 x-initiator=agent + x-interaction-type=conversation-subagent，避免子代理计费
     #[serde(default = "default_true")]
     pub subagent_detection: bool,
-    /// Warmup 小模型降级（默认开启 — 与参考实现对齐，避免探针请求消耗 premium quota）
-    #[serde(default = "default_true")]
+    /// Legacy global warmup flag: read/write only for saved-settings compatibility.
+    /// Runtime routing uses ProviderMeta::copilot_warmup_downgrade exclusively.
+    #[serde(default)]
     pub warmup_downgrade: bool,
-    /// Warmup 降级使用的模型（默认 "gpt-5-mini"）
+    /// Legacy global warmup target: ignored for routing; per-provider metadata owns it.
     #[serde(default = "default_warmup_model")]
     pub warmup_model: String,
     /// 请求前主动剥离 assistant 消息里的 thinking / redacted_thinking block
@@ -311,7 +312,7 @@ pub struct CopilotOptimizerConfig {
 }
 
 fn default_warmup_model() -> String {
-    "gpt-5-mini".to_string()
+    String::new()
 }
 
 impl Default for CopilotOptimizerConfig {
@@ -323,8 +324,8 @@ impl Default for CopilotOptimizerConfig {
             compact_detection: true,
             deterministic_request_id: true,
             subagent_detection: true,
-            warmup_downgrade: true,
-            warmup_model: "gpt-5-mini".to_string(),
+            warmup_downgrade: false,
+            warmup_model: String::new(),
             strip_thinking: true,
         }
     }
