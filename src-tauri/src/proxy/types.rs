@@ -296,10 +296,11 @@ pub struct CopilotOptimizerConfig {
     /// 设置 x-initiator=agent + x-interaction-type=conversation-subagent，避免子代理计费
     #[serde(default = "default_true")]
     pub subagent_detection: bool,
-    /// Warmup 小模型降级（默认开启 — 与参考实现对齐，避免探针请求消耗 premium quota）
-    #[serde(default = "default_true")]
+    /// 可选的 warmup 模型降级。探针启发式可能匹配真实请求，因此必须显式开启。
+    /// 老配置中的 true 仍受可用模型目录校验保护，避免发送无效的模型名。
+    #[serde(default)]
     pub warmup_downgrade: bool,
-    /// Warmup 降级使用的模型（默认 "gpt-5-mini"）
+    /// Warmup 降级模型（遗留默认值 "gpt-5-mini"；使用前必须在当前 Copilot 账号的目录中精确匹配）
     #[serde(default = "default_warmup_model")]
     pub warmup_model: String,
     /// 请求前主动剥离 assistant 消息里的 thinking / redacted_thinking block
@@ -323,7 +324,7 @@ impl Default for CopilotOptimizerConfig {
             compact_detection: true,
             deterministic_request_id: true,
             subagent_detection: true,
-            warmup_downgrade: true,
+            warmup_downgrade: false,
             warmup_model: "gpt-5-mini".to_string(),
             strip_thinking: true,
         }
