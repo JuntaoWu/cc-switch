@@ -485,7 +485,12 @@ export function ClaudeFormFields({
             onValueChange={(value) => onCopilotWarmupModelChange?.(value)}
             disabled={!copilotWarmupDowngrade || warmupCandidates.length === 0}
           >
-            <SelectTrigger aria-label={t("copilot.warmupModel", { defaultValue: "Warmup model" })} className="min-w-0 flex-1">
+            <SelectTrigger
+              aria-label={t("copilot.warmupModel", {
+                defaultValue: "Warmup model",
+              })}
+              className="min-w-0 flex-1"
+            >
               <SelectValue
                 placeholder={t("copilot.warmupChooseModel", {
                   defaultValue: "Select a supported Copilot model",
@@ -500,8 +505,18 @@ export function ClaudeFormFields({
               ))}
             </SelectContent>
           </Select>
-          <Button type="button" variant="outline" size="sm" onClick={handleFetchCopilotModels} disabled={modelsLoading}>
-            {modelsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : t("providerForm.reload", { defaultValue: "Reload" })}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleFetchCopilotModels}
+            disabled={modelsLoading}
+          >
+            {modelsLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              t("providerForm.reload", { defaultValue: "Reload" })
+            )}
           </Button>
         </div>
         {copilotWarmupDowngrade &&
@@ -510,13 +525,15 @@ export function ClaudeFormFields({
               !warmupCandidates.some((model) => model.id === copilotWarmupModel))) && (
             <p className="text-xs text-warning-text">
               {t("copilot.warmupMissing", {
-                defaultValue: "Choose an available model; otherwise the original model will be used.",
+                defaultValue:
+                  "Choose an available model; otherwise the original model will be used.",
               })}
             </p>
           )}
         <p className="text-xs text-fg-2">
           {t("copilot.warmupHint", {
-            defaultValue: "Off by default. Model availability is checked again for each active account; if unavailable, CC Switch preserves the requested model.",
+            defaultValue:
+              "Off by default. Model availability is checked again for each active account; if unavailable, CC Switch preserves the requested model.",
           })}
         </p>
       </CollapsibleContent>
