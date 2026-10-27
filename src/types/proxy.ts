@@ -143,11 +143,20 @@ export interface ProxyStackSubagentModel {
   defaultEffort?: string;
 }
 
+/** Claude Aggregation role choices reuse published Stack model IDs. */
+export interface ProxyStackRoleChoice {
+  id: string;
+  displayName: string;
+}
+
 /** Stack 模式的状态、名单和提示。 */
 export interface ProxyStack {
   /** 在 Stack 模式（代理模式且 Stack 模式开着）。 */
   active: boolean;
   members: ProxyStackMember[];
+  /** Sparse overrides, keyed by haiku/sonnet/opus/fable. */
+  roleOverrides?: Record<string, string>;
+  roleChoices?: ProxyStackRoleChoice[];
   notice?: ProxyStackNotice;
   noticeReasons?: ProxyStackNoticeReason[];
   staleClients?: CodexStaleClients;
