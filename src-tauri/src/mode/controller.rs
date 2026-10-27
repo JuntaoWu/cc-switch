@@ -1406,10 +1406,10 @@ pub async fn set_stack_role_override(
     role: &str,
     model_id: Option<&str>,
 ) -> Result<(), StackWriteError> {
-    if !matches!(app, AppType::Claude)
-        || !matches!(role, "haiku" | "sonnet" | "opus" | "fable")
-    {
-        return Err(StackWriteError::unchanged("Invalid Claude Code Aggregation role"));
+    if !matches!(app, AppType::Claude) || !matches!(role, "haiku" | "sonnet" | "opus" | "fable") {
+        return Err(StackWriteError::unchanged(
+            "Invalid Claude Code Aggregation role",
+        ));
     }
     let _guard = lock_settled(state, app)
         .await
@@ -1438,13 +1438,9 @@ async fn set_stack_role_override_locked(
     }
     if let Some(model_id) = model_id {
         let mode = current::mode_state(app);
-        let members = stack::published_members(
-            &state.db,
-            app,
-            &current,
-            mode.proxy_route.as_deref(),
-        )
-        .map_err(err)?;
+        let members =
+            stack::published_members(&state.db, app, &current, mode.proxy_route.as_deref())
+                .map_err(err)?;
         if !stack::claude_published(&members)
             .iter()
             .any(|model| model.id == model_id)
@@ -2119,10 +2115,7 @@ mod tests {
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-6-luna"
             }),
         );
-        let google = stack_member(
-            "google",
-            json!({"ANTHROPIC_MODEL": "gemini-3.8-high"}),
-        );
+        let google = stack_member("google", json!({"ANTHROPIC_MODEL": "gemini-3.8-high"}));
         let published: Vec<StackModel> = [&copilot, &google]
             .into_iter()
             .flat_map(|provider| stack::claude_models(&provider.id, provider))
@@ -2143,8 +2136,14 @@ mod tests {
         overrides.insert("haiku".to_string(), luna.id.clone());
         apply_claude_role_overrides(&mut projection, &overrides, &published);
         assert_eq!(projection.env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], luna.id);
-        assert_eq!(projection.env["ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME"], "gpt-6-luna");
-        assert_eq!(projection.env["ANTHROPIC_DEFAULT_SONNET_MODEL"], original_sonnet);
+        assert_eq!(
+            projection.env["ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME"],
+            "gpt-6-luna"
+        );
+        assert_eq!(
+            projection.env["ANTHROPIC_DEFAULT_SONNET_MODEL"],
+            original_sonnet
+        );
 
         // A removed member is never silently replaced by the default provider.
         let removed_id = "ccs-claude-removed--model".to_string();
