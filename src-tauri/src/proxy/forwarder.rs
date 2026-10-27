@@ -3968,9 +3968,9 @@ fn apply_copilot_warmup_downgrade(
     let Some(requested) = body.get("model").and_then(Value::as_str) else {
         return false;
     };
-    let Some(replacement) = models.and_then(|models| {
-        available_copilot_warmup_model(&config.warmup_model, requested, models)
-    }) else {
+    let Some(replacement) = models
+        .and_then(|models| available_copilot_warmup_model(&config.warmup_model, requested, models))
+    else {
         return false;
     };
     body["model"] = Value::String(replacement.to_string());
