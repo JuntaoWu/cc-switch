@@ -525,13 +525,13 @@ export function ClaudeFormFields({
           </Button>
         </div>
         {copilotWarmupDowngrade && warmupModelUnavailable && (
-            <p className="text-xs text-warning-text">
-              {t("copilot.warmupMissing", {
-                defaultValue:
-                  "Choose an available model; otherwise the original model will be used.",
-              })}
-            </p>
-          )}
+          <p className="text-xs text-warning-text">
+            {t("copilot.warmupMissing", {
+              defaultValue:
+                "Choose an available model; otherwise the original model will be used.",
+            })}
+          </p>
+        )}
         <p className="text-xs text-fg-2">
           {t("copilot.warmupHint", {
             defaultValue:
