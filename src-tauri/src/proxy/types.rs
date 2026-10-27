@@ -300,7 +300,7 @@ pub struct CopilotOptimizerConfig {
     /// 老配置中的 true 仍受可用模型目录校验保护，避免发送无效的模型名。
     #[serde(default)]
     pub warmup_downgrade: bool,
-    /// Warmup 降级模型（遗留默认值 "gpt-5-mini"；使用前必须在当前 Copilot 账号的目录中精确匹配）
+    /// 可选的 warmup 目标模型：无内置模型假设，使用前须验证当前 Copilot 账号支持。
     #[serde(default = "default_warmup_model")]
     pub warmup_model: String,
     /// 请求前主动剥离 assistant 消息里的 thinking / redacted_thinking block
@@ -312,7 +312,7 @@ pub struct CopilotOptimizerConfig {
 }
 
 fn default_warmup_model() -> String {
-    "gpt-5-mini".to_string()
+    String::new()
 }
 
 impl Default for CopilotOptimizerConfig {
@@ -325,7 +325,7 @@ impl Default for CopilotOptimizerConfig {
             deterministic_request_id: true,
             subagent_detection: true,
             warmup_downgrade: false,
-            warmup_model: "gpt-5-mini".to_string(),
+            warmup_model: String::new(),
             strip_thinking: true,
         }
     }
