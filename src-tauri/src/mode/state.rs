@@ -445,10 +445,9 @@ mod tests {
         assert!(state.role_overrides.is_empty());
         assert_eq!(serde_json::to_value(&state).unwrap(), old);
 
-        state.role_overrides.insert(
-            "haiku".into(),
-            "ccs-claude-github--gpt-6-luna".into(),
-        );
+        state
+            .role_overrides
+            .insert("haiku".into(), "ccs-claude-github--gpt-6-luna".into());
         let restored: StackState =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
         assert_eq!(restored.role_overrides, state.role_overrides);
