@@ -34,7 +34,7 @@ use crate::proxy::providers::copilot_model_map::{
 use crate::proxy::providers::xai_oauth_auth::XaiOAuthManager;
 use crate::{
     app_config::AppType,
-    provider::{CodexCopilotApiFormat, LocalProxyRequestOverrides, Provider},
+    provider::{CodexCopilotApiFormat, LocalProxyRequestOverrides, Provider, ProviderMeta},
 };
 use bytes::Bytes;
 use futures::StreamExt;
@@ -1588,7 +1588,9 @@ impl RequestForwarder {
             // "anthropic-beta + no tools" is only a heuristic and can match real requests.
             // Never replace an explicitly mapped model with one that the active Copilot
             // account cannot serve; missing/failed model discovery fails open.
-            if self.copilot_optimizer_config.warmup_downgrade && classification.is_warmup {
+            if provider.meta.as_ref().is_some_and(|meta| meta.copilot_warmup_downgrade == Some(true))
+                && classification.is_warmup
+            {
                 let requested = mapped_body
                     .get("model")
                     .and_then(Value::as_str)
@@ -1596,7 +1598,7 @@ impl RequestForwarder {
                     .to_string();
                 if apply_copilot_warmup_downgrade(
                     &mut mapped_body,
-                    &self.copilot_optimizer_config,
+                    provider.meta.as_ref(),
                     classification.is_warmup,
                     copilot_live_models.as_deref(),
                 ) {
@@ -3954,22 +3956,25 @@ fn rewrite_codex_endpoint_for_copilot(
     (rewritten, passthrough_query)
 }
 
-/// Apply a warmup substitution only if explicitly enabled and verified against
-/// the live catalog. Caller must preserve the original model on all skip paths.
+/// Per-provider metadata is the only warmup selection authority. Older global
+/// copilot_optimizer_config warmup fields remain deserializable but are ignored.
 fn apply_copilot_warmup_downgrade(
     body: &mut Value,
-    config: &CopilotOptimizerConfig,
+    meta: Option<&ProviderMeta>,
     is_warmup: bool,
     models: Option<&[CopilotModel]>,
 ) -> bool {
-    if !config.warmup_downgrade || !is_warmup {
+    let Some(model) = meta
+        .filter(|meta| meta.copilot_warmup_downgrade == Some(true) && is_warmup)
+        .and_then(|meta| meta.copilot_warmup_model.as_deref())
+    else {
         return false;
-    }
+    };
     let Some(requested) = body.get("model").and_then(Value::as_str) else {
         return false;
     };
-    let Some(replacement) = models
-        .and_then(|models| available_copilot_warmup_model(&config.warmup_model, requested, models))
+    let Some(replacement) =
+        models.and_then(|models| available_copilot_warmup_model(model, requested, models))
     else {
         return false;
     };
@@ -4760,50 +4765,57 @@ mod tests {
             Some("claude-haiku-4.5")
         );
 
-        // Test the full mutation seam: unsupported legacy downgrade must not
-        // change an otherwise valid requested model, even for a "warmup" prompt.
-        let mut config = CopilotOptimizerConfig {
+        // Legacy global config is never consulted, even when it enables a missing model.
+        let global = CopilotOptimizerConfig {
             warmup_downgrade: true,
             warmup_model: "gpt-5-mini".into(),
+            ..Default::default()
+        };
+        assert!(global.warmup_downgrade);
+        let mut meta = ProviderMeta {
+            copilot_warmup_downgrade: Some(true),
+            copilot_warmup_model: Some("gpt-5-mini".into()),
             ..Default::default()
         };
         let mut request = json!({"model": "gpt-6.1-sol"});
         assert!(!apply_copilot_warmup_downgrade(
             &mut request,
-            &config,
+            Some(&meta),
             true,
             Some(&catalog)
         ));
         assert_eq!(request["model"], "gpt-6.1-sol");
-        assert!(!apply_copilot_warmup_downgrade(
-            &mut request,
-            &config,
-            true,
-            None
-        ));
+        assert!(!apply_copilot_warmup_downgrade(&mut request, Some(&meta), true, None));
         assert_eq!(request["model"], "gpt-6.1-sol");
 
-        config.warmup_model = "gpt-6-luna".into();
+        meta.copilot_warmup_model = Some("gpt-6-luna".into());
         assert!(!apply_copilot_warmup_downgrade(
             &mut request,
-            &config,
+            Some(&meta),
             false,
             Some(&catalog)
         ));
         assert_eq!(request["model"], "gpt-6.1-sol");
-        config.warmup_downgrade = false;
+        meta.copilot_warmup_downgrade = None;
         assert!(!apply_copilot_warmup_downgrade(
             &mut request,
-            &config,
+            Some(&meta),
+            true,
+            Some(&catalog)
+        ));
+        assert_eq!(request["model"], "gpt-6.1-sol");
+        assert!(!apply_copilot_warmup_downgrade(
+            &mut request,
+            None,
             true,
             Some(&catalog)
         ));
         assert_eq!(request["model"], "gpt-6.1-sol");
 
-        config.warmup_downgrade = true;
+        meta.copilot_warmup_downgrade = Some(true);
         assert!(apply_copilot_warmup_downgrade(
             &mut request,
-            &config,
+            Some(&meta),
             true,
             Some(&catalog)
         ));
