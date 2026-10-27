@@ -202,6 +202,23 @@ pub async fn set_proxy_stack_member(
     result
 }
 
+/// Set or clear one Claude Code Aggregation role override. The published Stack
+/// model ID already encodes the provider identity.
+#[tauri::command]
+pub async fn set_proxy_stack_role_override(
+    state: tauri::State<'_, AppState>,
+    role: String,
+    model_id: Option<String>,
+) -> Result<(), crate::mode::controller::StackWriteError> {
+    crate::mode::controller::set_stack_role_override(
+        state.inner(),
+        &AppType::Claude,
+        &role,
+        model_id.as_deref(),
+    )
+    .await
+}
+
 /// Codex 聚合的模型被别的模型目录挡住时，改用 CC Switch 生成的目录（去掉指向别的文件的
 /// `model_catalog_json`）。返回之后还剩的提示。
 #[tauri::command]
