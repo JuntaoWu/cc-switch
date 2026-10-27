@@ -438,6 +438,8 @@ function ProviderFormFull({
     setSelectedGitHubAccountId(
       resolveManagedAccountId(initialData?.meta, "github_copilot"),
     );
+    setCopilotWarmupDowngrade(initialData?.meta?.copilotWarmupDowngrade === true);
+    setCopilotWarmupModel(initialData?.meta?.copilotWarmupModel ?? "");
     setSelectedCodexAccountId(
       resolveManagedAccountId(initialData?.meta, "codex_oauth"),
     );
@@ -634,6 +636,12 @@ function ProviderFormFull({
   const [selectedGitHubAccountId, setSelectedGitHubAccountId] = useState<
     string | null
   >(() => resolveManagedAccountId(initialData?.meta, "github_copilot"));
+  const [copilotWarmupDowngrade, setCopilotWarmupDowngrade] = useState(
+    () => initialData?.meta?.copilotWarmupDowngrade === true,
+  );
+  const [copilotWarmupModel, setCopilotWarmupModel] = useState(
+    () => initialData?.meta?.copilotWarmupModel ?? "",
+  );
 
   // 选中的 ChatGPT 账号 ID（Codex OAuth 多账号支持）
   const [selectedCodexAccountId, setSelectedCodexAccountId] = useState<
@@ -2009,6 +2017,14 @@ function ProviderFormFull({
               ? "openai_responses"
               : localCodexApiFormat
             : undefined,
+      copilotWarmupDowngrade:
+        appId === "claude" && isCopilotProvider && copilotWarmupDowngrade
+          ? true
+          : undefined,
+      copilotWarmupModel:
+        appId === "claude" && isCopilotProvider && copilotWarmupDowngrade
+          ? copilotWarmupModel.trim() || undefined
+          : undefined,
       codexCopilotApiFormat:
         appId === "codex" &&
         isCopilotProvider &&
@@ -2650,7 +2666,17 @@ function ProviderFormFull({
               }
               isCopilotAuthenticated={isCopilotAuthenticated}
               selectedGitHubAccountId={selectedGitHubAccountId}
-              onGitHubAccountSelect={setSelectedGitHubAccountId}
+              onGitHubAccountSelect={(accountId) => {
+                if (accountId !== selectedGitHubAccountId) {
+                  setCopilotWarmupDowngrade(false);
+                  setCopilotWarmupModel("");
+                }
+                setSelectedGitHubAccountId(accountId);
+              }}
+              copilotWarmupDowngrade={copilotWarmupDowngrade}
+              onCopilotWarmupDowngradeChange={setCopilotWarmupDowngrade}
+              copilotWarmupModel={copilotWarmupModel}
+              onCopilotWarmupModelChange={setCopilotWarmupModel}
               onManageAuthAccounts={onManageAuthAccounts}
               isCodexOauthAuthenticated={isCodexOauthAuthenticated}
               selectedCodexAccountId={selectedCodexAccountId}
