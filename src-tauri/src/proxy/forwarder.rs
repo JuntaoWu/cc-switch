@@ -1514,11 +1514,10 @@ impl RequestForwarder {
             super::providers::apply_codex_upstream_model(provider, &mut mapped_body);
         }
 
-        let mut copilot_live_models = None;
-        if is_copilot_claude_body {
+        let copilot_live_models = if is_copilot_claude_body {
             mapped_body =
                 super::providers::copilot_model_map::apply_copilot_model_normalization(mapped_body);
-            copilot_live_models = self
+            let models = self
                 .apply_copilot_live_model_resolution(provider, &mut mapped_body)
                 .await;
             // Strip the [1M] context marker after Copilot normalization/resolve.
@@ -1530,6 +1529,7 @@ impl RequestForwarder {
             // variants pass through unchanged.
             mapped_body =
                 super::model_mapper::strip_one_m_suffix_for_upstream_from_body(mapped_body);
+            models
         } else if !is_copilot_codex_responses && !codex_responses_to_anthropic {
             // Skip on the Codex→Anthropic path: stripping [1m] here would break both the
             // model-catalog match (apply_codex_upstream_model) and the transform's own
@@ -1537,7 +1537,10 @@ impl RequestForwarder {
             // final anthropic_body.
             mapped_body =
                 super::model_mapper::strip_one_m_suffix_for_upstream_from_body(mapped_body);
-        }
+            None
+        } else {
+            None
+        };
 
         // --- Copilot 优化器：分类 + 请求体优化（在格式转换之前执行） ---
         // 注意：确定性 ID 也在此处计算，因为 mapped_body 在格式转换时会被 move
