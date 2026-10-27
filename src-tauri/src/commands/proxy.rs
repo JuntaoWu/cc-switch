@@ -212,7 +212,7 @@ pub async fn set_proxy_stack_role_override(
 ) -> Result<(), crate::mode::controller::StackWriteError> {
     crate::mode::controller::set_stack_role_override(
         state.inner(),
-        &AppType::Claude,
+        &crate::app_config::AppType::Claude,
         &role,
         model_id.as_deref(),
     )
