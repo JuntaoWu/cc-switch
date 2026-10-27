@@ -296,11 +296,11 @@ pub struct CopilotOptimizerConfig {
     /// 设置 x-initiator=agent + x-interaction-type=conversation-subagent，避免子代理计费
     #[serde(default = "default_true")]
     pub subagent_detection: bool,
-    /// 可选的 warmup 模型降级。探针启发式可能匹配真实请求，因此必须显式开启。
-    /// 老配置中的 true 仍受可用模型目录校验保护，避免发送无效的模型名。
+    /// Legacy global warmup flag: read/write only for saved-settings compatibility.
+    /// Runtime routing uses ProviderMeta::copilot_warmup_downgrade exclusively.
     #[serde(default)]
     pub warmup_downgrade: bool,
-    /// 可选的 warmup 目标模型：无内置模型假设，使用前须验证当前 Copilot 账号支持。
+    /// Legacy global warmup target: ignored for routing; per-provider metadata owns it.
     #[serde(default = "default_warmup_model")]
     pub warmup_model: String,
     /// 请求前主动剥离 assistant 消息里的 thinking / redacted_thinking block
