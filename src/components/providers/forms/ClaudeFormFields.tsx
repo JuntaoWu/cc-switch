@@ -98,6 +98,10 @@ interface ClaudeFormFieldsProps {
   selectedGitHubAccountId?: string | null;
   /** GitHub 账号选择回调（多账号支持） */
   onGitHubAccountSelect?: (accountId: string | null) => void;
+  copilotWarmupDowngrade?: boolean;
+  onCopilotWarmupDowngradeChange?: (enabled: boolean) => void;
+  copilotWarmupModel?: string;
+  onCopilotWarmupModelChange?: (model: string) => void;
   /** 打开托管账号管理入口 */
   onManageAuthAccounts?: (target: ManagedAuthProvider) => void;
 
@@ -196,6 +200,10 @@ export function ClaudeFormFields({
   isCopilotAuthenticated,
   selectedGitHubAccountId,
   onGitHubAccountSelect,
+  copilotWarmupDowngrade = false,
+  onCopilotWarmupDowngradeChange,
+  copilotWarmupModel = "",
+  onCopilotWarmupModelChange,
   onManageAuthAccounts,
   isCodexOauthPreset,
   isCodexOauthAuthenticated,
@@ -289,6 +297,16 @@ export function ClaudeFormFields({
   const [copilotModels, setCopilotModels] = useState<CopilotModel[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const copilotModelsRequestRef = useRef(0);
+  const [copilotWarmupExpanded, setCopilotWarmupExpanded] = useState(
+    copilotWarmupDowngrade,
+  );
+
+  // A changed account must never display the previous account's model catalog.
+  useEffect(() => {
+    copilotModelsRequestRef.current += 1;
+    setCopilotModels([]);
+    setModelsLoading(false);
+  }, [selectedGitHubAccountId]);
 
   // Codex OAuth 可用模型列表
   const [codexOauthModels, setCodexOauthModels] = useState<FetchedModel[]>([]);
@@ -406,6 +424,104 @@ export function ClaudeFormFields({
     showModelFetchResult,
     t,
   ]);
+
+  // Show only the models that the forwarder accepts for warmup substitution.
+  // Account-specific data comes from the existing Copilot model-fetch action.
+  const warmupCandidates = copilotModels.filter((model) => {
+    if (!model.model_picker_enabled) return false;
+    const expected =
+      model.vendor.toLowerCase() === "openai"
+        ? ["/responses", "/v1/responses"]
+        : ["/chat/completions", "/v1/chat/completions"];
+    return model.supported_endpoints?.some((endpoint) =>
+      expected.some(
+        (path) =>
+          endpoint.split("?")[0].replace(/\\/$/, "").toLowerCase() === path,
+      ),
+    );
+  });
+
+  const warmupSection = isCopilotPreset && (
+    <Collapsible
+      open={copilotWarmupExpanded}
+      onOpenChange={setCopilotWarmupExpanded}
+      className="rounded-lg border border-border p-4"
+    >
+      <CollapsibleTrigger asChild>
+        <Button
+          type="button"
+          variant={null}
+          size="sm"
+          className="h-8 w-full justify-start gap-1.5 px-0 text-sm font-medium text-fg-1 hover:opacity-70 active:scale-100"
+        >
+          {copilotWarmupExpanded ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
+          {t("copilot.warmupOptimization", {
+            defaultValue: "Request optimization (advanced)",
+          })}
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-3 pt-3">
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={copilotWarmupDowngrade}
+            onCheckedChange={(value) => {
+              onCopilotWarmupDowngradeChange?.(value === true);
+              if (value === true && !copilotModels.length && !modelsLoading) {
+                handleFetchCopilotModels();
+              }
+            }}
+          />
+          {t("copilot.warmupDowngrade", {
+            defaultValue: "Use another model for warmup requests",
+          })}
+        </label>
+        <div className="flex items-center gap-2">
+          <Select
+            value={copilotWarmupModel || undefined}
+            onValueChange={(value) => onCopilotWarmupModelChange?.(value)}
+            disabled={!copilotWarmupDowngrade || warmupCandidates.length === 0}
+          >
+            <SelectTrigger aria-label={t("copilot.warmupModel", { defaultValue: "Warmup model" })} className="min-w-0 flex-1">
+              <SelectValue
+                placeholder={t("copilot.warmupChooseModel", {
+                  defaultValue: "Select a supported Copilot model",
+                })}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {warmupCandidates.map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  {model.name || model.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button type="button" variant="outline" size="sm" onClick={handleFetchCopilotModels} disabled={modelsLoading}>
+            {modelsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : t("providerForm.reload", { defaultValue: "Reload" })}
+          </Button>
+        </div>
+        {copilotWarmupDowngrade &&
+          (!copilotWarmupModel ||
+            (copilotModels.length > 0 &&
+              !warmupCandidates.some((model) => model.id === copilotWarmupModel))) && (
+            <p className="text-xs text-warning-text">
+              {t("copilot.warmupMissing", {
+                defaultValue: "Choose an available model; otherwise the original model will be used.",
+              })}
+            </p>
+          )}
+        <p className="text-xs text-fg-2">
+          {t("copilot.warmupHint", {
+            defaultValue: "Off by default. Model availability is checked again for each active account; if unavailable, CC Switch preserves the requested model.",
+          })}
+        </p>
+      </CollapsibleContent>
+    </Collapsible>
+  );
 
   const handleFetchCodexOauthModels = useCallback(() => {
     if (!isCodexOauthAuthenticated) {
@@ -1029,6 +1145,7 @@ export function ClaudeFormFields({
             baseUrl={baseUrl}
           />
         )}
+        {warmupSection}
 
         {/* 高级区只有 UA 和请求覆盖；Copilot 的转发会跳过这两项，整块不显示 */}
         {!isCopilotPreset && (
@@ -1341,6 +1458,7 @@ export function ClaudeFormFields({
           </CollapsibleContent>
         </Collapsible>
       )}
+      {warmupSection}
     </>
   );
 }
