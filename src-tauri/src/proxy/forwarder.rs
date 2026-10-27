@@ -4004,7 +4004,9 @@ fn available_copilot_warmup_model<'a>(
                     .split_once('?')
                     .map_or(endpoint.as_str(), |(path, _)| path)
                     .trim_end_matches('/');
-                endpoints.iter().any(|supported| path.eq_ignore_ascii_case(supported))
+                endpoints
+                    .iter()
+                    .any(|supported| path.eq_ignore_ascii_case(supported))
             })
         })
         .map(|model| model.id.as_str())
@@ -4709,18 +4711,41 @@ mod tests {
         let catalog = [
             model("gpt-6.1-sol", "OpenAI", true, &["/v1/responses"]),
             model("gpt-6-luna", "OpenAI", true, &["/responses"]),
-            model("claude-haiku-4.5", "Anthropic", true, &["/chat/completions"]),
+            model(
+                "claude-haiku-4.5",
+                "Anthropic",
+                true,
+                &["/chat/completions"],
+            ),
             model("hidden-mini", "OpenAI", false, &["/responses"]),
             model("chat-only-gpt", "OpenAI", true, &["/chat/completions"]),
         ];
 
         // Reproduces the reported failure: the old hard-coded mini is absent.
-        assert_eq!(available_copilot_warmup_model("gpt-5-mini", "gpt-6.1-sol", &catalog), None);
-        assert_eq!(available_copilot_warmup_model("gpt-6-luna", "gpt-6.1-sol", &[]), None);
-        assert_eq!(available_copilot_warmup_model("", "gpt-6.1-sol", &catalog), None);
-        assert_eq!(available_copilot_warmup_model("gpt-6.1-sol", "gpt-6.1-sol", &catalog), None);
-        assert_eq!(available_copilot_warmup_model("hidden-mini", "gpt-6.1-sol", &catalog), None);
-        assert_eq!(available_copilot_warmup_model("chat-only-gpt", "gpt-6.1-sol", &catalog), None);
+        assert_eq!(
+            available_copilot_warmup_model("gpt-5-mini", "gpt-6.1-sol", &catalog),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("gpt-6-luna", "gpt-6.1-sol", &[]),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("", "gpt-6.1-sol", &catalog),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("gpt-6.1-sol", "gpt-6.1-sol", &catalog),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("hidden-mini", "gpt-6.1-sol", &catalog),
+            None
+        );
+        assert_eq!(
+            available_copilot_warmup_model("chat-only-gpt", "gpt-6.1-sol", &catalog),
+            None
+        );
 
         // A selected account can opt into a real available replacement.
         assert_eq!(
