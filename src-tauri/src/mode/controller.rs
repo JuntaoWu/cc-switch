@@ -6085,6 +6085,72 @@ model_provider = "c"
 
     #[tokio::test]
     #[serial]
+    async fn aggregation_role_override_survives_reentry_and_default_switch() {
+        let _home = Home::new();
+        seed_settings(USER_SETTINGS);
+        let state = state_with(AppType::Claude, &stack_rows(), "a").await;
+        enter(&state, &AppType::Claude, true).await.expect("enter");
+        set_member(&state, "kimi", true).await;
+
+        let binding = "ccs-claude-kimi--kimi-k3";
+        set_stack_role_override(&state, &AppType::Claude, "haiku", Some(binding))
+            .await
+            .expect("bind haiku");
+        assert_eq!(stack_state().role_overrides["haiku"], binding);
+        assert_eq!(settings()["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], binding);
+        assert_eq!(
+            settings()["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "ccs-claude-a--claude-sonnet-4-6",
+        );
+
+        exit(&state, &AppType::Claude).await.expect("exit");
+        assert_back_to_user_settings();
+        enter(&state, &AppType::Claude, true)
+            .await
+            .expect("reattach");
+        assert_eq!(settings()["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], binding);
+
+        ProviderService::switch(&state, AppType::Claude, "zhipu")
+            .expect("switch default provider");
+        assert_eq!(settings()["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], binding);
+        assert_eq!(
+            settings()["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "ccs-claude-zhipu--glm-5.2[1M]",
+        );
+
+        set_member(&state, "kimi", false).await;
+        assert_eq!(stack_state().role_overrides["haiku"], binding);
+        assert!(
+            !stack_views(&state, &AppType::Claude)
+                .unwrap()
+                .role_choices
+                .iter()
+                .any(|choice| choice.id == binding),
+            "the removed model is unavailable but its binding remains pinned"
+        );
+        assert_eq!(settings()["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], binding);
+        set_member(&state, "kimi", true).await;
+        assert!(
+            stack_views(&state, &AppType::Claude)
+                .unwrap()
+                .role_choices
+                .iter()
+                .any(|choice| choice.id == binding),
+            "restored model becomes available without changing the binding"
+        );
+
+        set_stack_role_override(&state, &AppType::Claude, "haiku", None)
+            .await
+            .expect("follow default");
+        assert!(stack_state().role_overrides.is_empty());
+        assert_eq!(
+            settings()["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+            "ccs-claude-zhipu--glm-5.2[1M]",
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn routing_mode_and_stack_mode_share_the_list() {
         let _home = Home::new();
         seed_settings(USER_SETTINGS);
