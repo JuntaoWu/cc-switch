@@ -441,10 +441,12 @@ export function ClaudeFormFields({
     );
   });
 
+  const savedWarmupModelNotListed =
+    !!copilotWarmupModel &&
+    !warmupCandidates.some((model) => model.id === copilotWarmupModel);
   const warmupModelUnavailable =
     !copilotWarmupModel ||
-    (copilotModels.length > 0 &&
-      !warmupCandidates.some((model) => model.id === copilotWarmupModel));
+    (copilotModels.length > 0 && savedWarmupModelNotListed);
 
   const warmupSection = isCopilotPreset && (
     <Collapsible
@@ -508,6 +510,13 @@ export function ClaudeFormFields({
                   {model.name || model.id}
                 </SelectItem>
               ))}
+              {/* Preserve the selected item until the account catalog is loaded.
+                  Radix Select cannot display an ID without a matching SelectItem. */}
+              {savedWarmupModelNotListed && (
+                <SelectItem value={copilotWarmupModel}>
+                  {copilotWarmupModel}
+                </SelectItem>
+              )}
             </SelectContent>
           </Select>
           <Button
