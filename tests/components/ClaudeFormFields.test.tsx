@@ -153,6 +153,19 @@ describe("ClaudeFormFields", () => {
     },
   );
 
+  it("shows a saved warmup model after restart without fetching the catalog", () => {
+    renderCopilotForm({
+      copilotWarmupDowngrade: true,
+      copilotWarmupModel: "gpt-6-luna",
+    });
+
+    expect(
+      screen.getByRole("combobox", { name: "copilot.warmupModel" }),
+    ).toHaveTextContent("gpt-6-luna");
+    expect(copilotApiMock.copilotGetModelsForAccount).not.toHaveBeenCalled();
+    expect(copilotApiMock.copilotGetModels).not.toHaveBeenCalled();
+  });
+
   it("点击获取模型列表后才请求当前 Copilot 账号的模型", async () => {
     renderCopilotForm();
 
