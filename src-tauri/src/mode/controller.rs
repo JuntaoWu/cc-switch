@@ -254,7 +254,7 @@ const CLAUDE_MAX_CONTEXT_ENV: &str = "CLAUDE_CODE_MAX_CONTEXT_TOKENS";
 const CLAUDE_MODEL_PICKER: &str = "modelPicker";
 
 /// 发布了 Stack 模型时：`/model` 换成 Stack 模型列表；`CLAUDE_CODE_MAX_CONTEXT_TOKENS` 改由
-/// Stack 模型决定，取非 1M 模型里最小的窗口（包括 200K，避免自定义模型被误判为未知窗口）。四档别名也写成 Stack id，
+/// Stack 模型决定，取非 1M 模型里最小的窗口（等于默认 200K 时不写）。四档别名也写成 Stack id，
 /// 同样受 MAX 约束；1M 的 Stack 模型不受 MAX 影响。没有发布 Stack 模型时契约和原来逐字节一致。
 fn with_stack_models(projection: &mut ClaudeProjection, stack: &[StackModel]) {
     if stack.is_empty() {
@@ -280,9 +280,7 @@ fn with_stack_models(projection: &mut ClaudeProjection, stack: &[StackModel]) {
         .filter(|model| !model.one_m)
         .map(|model| model.window)
         .min();
-    // Synthetic ccs-claude-* IDs are unknown to Claude Code: explicitly
-    // writing even the default 200K avoids the unknown-window startup warning.
-    if let Some(window) = smallest {
+    if let Some(window) = smallest.filter(|window| *window != stack::CLAUDE_DEFAULT_WINDOW) {
         projection.exclusive.insert(
             CLAUDE_MAX_CONTEXT_ENV.to_string(),
             Value::String(window.to_string()),
@@ -5966,7 +5964,7 @@ model_provider = "c"
             ])
         );
         let env = settings()["env"].clone();
-        assert_eq!(env[CLAUDE_MAX_CONTEXT_ENV], "200000", "{env}");
+        assert!(env.get(CLAUDE_MAX_CONTEXT_ENV).is_none(), "{env}");
 
         // 只剩默认那家：客户端文件和契约回到刚进入时的样子，登记簿保留。
         set_member(&state, "zhipu", false).await;
@@ -7020,7 +7018,7 @@ model_provider = "c"
             Some(vec!["ccs-claude-a--claude-sonnet-4-6".to_string()]),
             "a still publishes"
         );
-        assert_eq!(env[CLAUDE_MAX_CONTEXT_ENV], "200000", "{env}");
+        assert!(env.get(CLAUDE_MAX_CONTEXT_ENV).is_none(), "{env}");
         assert!(state
             .db
             .get_provider_by_id("kimi", "claude")
