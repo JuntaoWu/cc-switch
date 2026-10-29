@@ -6110,8 +6110,7 @@ model_provider = "c"
             .expect("reattach");
         assert_eq!(settings()["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], binding);
 
-        ProviderService::switch(&state, AppType::Claude, "zhipu")
-            .expect("switch default provider");
+        ProviderService::switch(&state, AppType::Claude, "zhipu").expect("switch default provider");
         assert_eq!(settings()["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], binding);
         assert_eq!(
             settings()["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"],
