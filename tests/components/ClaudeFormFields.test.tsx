@@ -160,7 +160,7 @@ describe("ClaudeFormFields", () => {
     });
 
     expect(
-      screen.getByRole("combobox", { name: "copilot.warmupModel" }),
+      screen.getByRole("combobox", { name: "Warmup model" }),
     ).toHaveTextContent("gpt-6-luna");
     expect(copilotApiMock.copilotGetModelsForAccount).not.toHaveBeenCalled();
     expect(copilotApiMock.copilotGetModels).not.toHaveBeenCalled();
