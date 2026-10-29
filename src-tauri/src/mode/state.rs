@@ -129,13 +129,21 @@ pub struct StackState {
     /// 客户端会一直带着选中过的 id，key 改了指向，旧 id 就会被悄悄发到另一家。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub keys: BTreeMap<String, String>,
+    /// Claude Code Aggregation: role -> published Stack model ID.
+    /// Absent roles follow the default provider; bound but removed models remain pinned.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub role_overrides: BTreeMap<String, String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
 impl StackState {
     pub fn is_empty(&self) -> bool {
-        !self.enabled && self.members.is_empty() && self.keys.is_empty() && self.extra.is_empty()
+        !self.enabled
+            && self.members.is_empty()
+            && self.keys.is_empty()
+            && self.role_overrides.is_empty()
+            && self.extra.is_empty()
     }
 
     /// 这家在登记簿里的 key。
@@ -425,6 +433,25 @@ pub fn apps_with_pending(store: &DeviceStore) -> Result<Vec<String>, AppError> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn stack_role_overrides_round_trip_and_default_to_empty() {
+        let old = serde_json::json!({
+            "enabled": true,
+            "members": ["copilot"],
+            "keys": {"github": "copilot"}
+        });
+        let mut state: StackState = serde_json::from_value(old.clone()).unwrap();
+        assert!(state.role_overrides.is_empty());
+        assert_eq!(serde_json::to_value(&state).unwrap(), old);
+
+        state
+            .role_overrides
+            .insert("haiku".into(), "ccs-claude-github--gpt-6-luna".into());
+        let restored: StackState =
+            serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+        assert_eq!(restored.role_overrides, state.role_overrides);
+    }
 
     fn sample_pending() -> Pending {
         Pending {

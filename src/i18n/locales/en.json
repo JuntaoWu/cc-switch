@@ -4267,6 +4267,14 @@
     "routeSettings": "Routing settings",
     "routeSettingsTitle": "Routing settings",
     "moreRouteSettings": "More routing settings",
+    "roleOverrides": {
+      "title": "Role model overrides",
+      "description": "Bind roles to published aggregation models. Unset roles follow the default provider. Changes save immediately.",
+      "followDefault": "Follow default provider",
+      "unavailable": "unavailable",
+      "unavailableHint": "This model is no longer published. Its binding is preserved; requests will fail until restored or changed.",
+      "saveFailed": "Unable to save role: {{error}}"
+    },
     "stackSettings": {
       "title": "Aggregation settings",
       "subagentDescription": "Sub-agents follow the main model by default. Pick an aggregated model and the sub-agents the main agent spawns use it by default (unless the main agent names a model when spawning). No Codex restart needed: new conversations pick it up, conversations already open keep the previous setting.",

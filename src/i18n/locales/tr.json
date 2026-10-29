@@ -4244,6 +4244,14 @@
     "routeSettings": "Yönlendirme ayarları",
     "routeSettingsTitle": "Yönlendirme ayarları",
     "moreRouteSettings": "Daha fazla yönlendirme ayarı",
+    "roleOverrides": {
+      "title": "Rol modeli geçersiz kılmaları",
+      "description": "Rolleri yayımlanan birleştirilmiş modellere bağlayın. Atanmayan roller varsayılan sağlayıcıyı izler. Değişiklikler hemen kaydedilir.",
+      "followDefault": "Varsayılan sağlayıcıyı izle",
+      "unavailable": "kullanılamıyor",
+      "unavailableHint": "Bu model artık listede yok. Bağlama korunur; model geri gelene veya değiştirilene kadar istekler başarısız olur.",
+      "saveFailed": "Rol kaydedilemedi: {{error}}"
+    },
     "stackSettings": {
       "title": "Birleştirme ayarları",
       "subagentDescription": "Alt aracılar varsayılan olarak ana modeli izler. Birleştirilmiş bir model seçerseniz ana aracının başlattığı alt aracılar da varsayılan olarak onu kullanır (ana aracı başlatırken model belirtirse bu geçerli olur). Codex'i yeniden başlatmanız gerekmez: yeni konuşmalar bu ayarı kullanır, açık konuşmalar önceki ayarla devam eder.",

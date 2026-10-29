@@ -805,6 +805,14 @@ pub struct StackSubagentModel {
     pub default_effort: Option<String>,
 }
 
+/// Claude Code Aggregation role choice, derived from the published model registry.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StackRoleChoice {
+    pub id: String,
+    pub display_name: String,
+}
+
 /// 给前端：Stack 模式的状态、名单和提示。
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -812,6 +820,12 @@ pub struct StackView {
     /// 在 Stack 模式（代理模式且 Stack 模式开着）。
     pub active: bool,
     pub members: Vec<StackMemberView>,
+    /// Sparse Claude Code role overrides (the key is haiku/sonnet/opus/fable).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub role_overrides: std::collections::BTreeMap<String, String>,
+    /// Published Claude Code aggregation models, used by the role selector.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub role_choices: Vec<StackRoleChoice>,
     /// Codex Stack 模型客户端看不到或看不全：`routeOwnsCatalog` 路由那家自己管理模型目录
     /// 文件，Stack 模型不发布；官方做路由时官方模型列表暂未取到：`officialModelsBundled`
     /// 暂用 Codex 自带的列表（可能缺账号专属的模型），`officialModelsUnavailable` Stack 模型

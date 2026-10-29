@@ -4267,6 +4267,14 @@
     "routeSettings": "路由设置",
     "routeSettingsTitle": "路由设置",
     "moreRouteSettings": "更多路由设置",
+    "roleOverrides": {
+      "title": "角色模型覆盖",
+      "description": "将角色绑定到聚合中的模型。未指定的角色跟随默认供应商。选择后立即保存。",
+      "followDefault": "跟随默认供应商",
+      "unavailable": "不可用",
+      "unavailableHint": "此模型已不在聚合列表中。绑定仍保留；恢复模型或更改绑定之前，请求将失败。",
+      "saveFailed": "保存角色失败：{{error}}"
+    },
     "stackSettings": {
       "title": "聚合设置",
       "subagentDescription": "子代理默认跟随主模型。选一个聚合里的模型后，主代理派出的子代理默认用它（主代理派单时自己指定了模型的除外）。不用重启 Codex，新开的对话就会用上；已经开着的对话仍按原来的设置。",
