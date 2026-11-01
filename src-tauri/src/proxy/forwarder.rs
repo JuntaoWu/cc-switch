@@ -4021,14 +4021,13 @@ fn available_copilot_warmup_model<'a>(
             if !model.model_picker_enabled || !model.id.eq_ignore_ascii_case(configured) {
                 return false;
             }
-            let endpoints: &[&str] = match copilot_api_format_for_model(
-                Some(&model.vendor),
-                &model.supported_endpoints,
-            ) {
-                "openai_responses" => &["/responses", "/v1/responses"],
-                "anthropic" => &["/v1/messages"],
-                _ => &["/chat/completions", "/v1/chat/completions"],
-            };
+            let endpoints: &[&str] =
+                match copilot_api_format_for_model(Some(&model.vendor), &model.supported_endpoints)
+                {
+                    "openai_responses" => &["/responses", "/v1/responses"],
+                    "anthropic" => &["/v1/messages"],
+                    _ => &["/chat/completions", "/v1/chat/completions"],
+                };
             model.supported_endpoints.iter().any(|endpoint| {
                 let path = endpoint
                     .split_once('?')
