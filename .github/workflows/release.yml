@@ -185,18 +185,31 @@ jobs:
           WINDOWS_RELEASE_ARCH: ${{ matrix.arch || 'x86_64' }}
         run: |
           $ErrorActionPreference = 'Stop'
-          # 只发布 MSI（和便携版 exe），不打用不上的 NSIS 安装包
+          $buildArgs = @('tauri', 'build', '--verbose', '--bundles', 'msi')
           if ($env:WINDOWS_RELEASE_ARCH -eq 'arm64') {
-            pnpm tauri build --target aarch64-pc-windows-msvc --bundles msi
-          } else {
-            pnpm tauri build --bundles msi
+            $buildArgs += @('--target', 'aarch64-pc-windows-msvc')
+          }
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            & pnpm @buildArgs
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -eq 3) { exit $LASTEXITCODE }
+            Write-Warning "Build/bundle attempt $attempt failed; retrying with existing build outputs"
+            Start-Sleep -Seconds (30 * $attempt)
           }
 
       - name: Build Tauri App (Linux)
         if: runner.os == 'Linux'
         env:
           LINUXDEPLOY_EXCLUDED_LIBRARIES: "libwayland-client.so*"
-        run: pnpm tauri build --bundles appimage,deb,rpm
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm tauri build --verbose --bundles appimage,deb,rpm; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            echo "Build/bundle attempt $attempt failed; retrying with existing build outputs"
+            sleep $((30 * attempt))
+          done
 
       - name: Prepare Windows Assets
         if: runner.os == 'Windows'
