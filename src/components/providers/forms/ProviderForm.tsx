@@ -58,6 +58,7 @@ import {
 import {
   openclawProviderPresets,
   rebaseOpenClawSuggestedDefaults,
+  savedOpenClawModelIds,
   type OpenClawProviderPreset,
   type OpenClawSuggestedDefaults,
 } from "@/config/openclawProviderPresets";
@@ -76,6 +77,10 @@ import {
   hasApiKeyField,
 } from "@/utils/providerConfigUtils";
 import { mergeProviderMeta } from "@/utils/providerMetaUtils";
+import {
+  BillingMultiplierField,
+  isValidBillingMultiplier,
+} from "./BillingMultiplierField";
 import {
   codexApiFormatFromWireApi,
   extractCodexWireApi,
@@ -113,8 +118,8 @@ import { KimiProviderForm } from "./KimiProviderForm";
 import { CopilotProviderForm } from "./CopilotProviderForm";
 import { AgyAccountSelect } from "./AgyOAuthSection";
 import { ClaudeAccountSelect } from "./ClaudeOfficialSection";
-import { isMac } from "@/lib/platform";
 import { McodeProviderForm } from "./McodeProviderForm";
+import { WorkBuddyProviderForm } from "./WorkBuddyProviderForm";
 import { PiProviderForm } from "./PiProviderForm";
 import { OmoFormFields } from "./OmoFormFields";
 import { parseOmoOtherFieldsObject } from "@/types/omo";
@@ -152,11 +157,15 @@ import {
   isNativeOpencodeConfig,
 } from "./helpers/opencodeFormUtils";
 import { HERMES_DEFAULT_CONFIG } from "./hooks/useHermesFormState";
-import { resolveManagedAccountId } from "@/lib/authBinding";
+import {
+  canSwitchAgyAccount,
+  resolveManagedAccountId,
+} from "@/lib/authBinding";
 import { useOpenClawLiveProviderIds } from "@/hooks/useOpenClaw";
 import { useHermesLiveProviderIds } from "@/hooks/useHermes";
 import { resolveCodexOfficialIdentity } from "@/utils/providerCapabilities";
 import { normalizeEnabledCodexChatEffortParam } from "./helpers/codexChatReasoning";
+import { appHas } from "@/config/appSpecs";
 
 type PresetEntry = {
   id: string;
@@ -361,7 +370,8 @@ export function ProviderForm(props: ProviderFormProps) {
   if (props.appId === "copilot") return <CopilotProviderForm {...props} />;
   if (props.appId === "mcode" || props.appId === "dsh")
     return <McodeProviderForm {...props} />;
-  if (props.appId === "pi" || props.appId === "omp") {
+  if (props.appId === "workbuddy") return <WorkBuddyProviderForm {...props} />;
+  if (appHas(props.appId, "piFamily")) {
     return <PiProviderForm {...props} />;
   }
   if (props.appId === "claude-desktop") {
@@ -495,6 +505,7 @@ function ProviderFormFull({
     );
     setPromptCacheRouting(initialData?.meta?.promptCacheRouting ?? "auto");
     setCustomUserAgent(initialData?.meta?.customUserAgent ?? "");
+    setBillingMultiplier(initialData?.meta?.billingMultiplier ?? "");
     setLocalProxyHeadersOverride(
       formatRequestOverrideObject(
         initialData?.meta?.localProxyRequestOverrides?.headers,
@@ -758,6 +769,12 @@ function ProviderFormFull({
   const [customUserAgent, setCustomUserAgent] = useState<string>(
     () => initialData?.meta?.customUserAgent ?? "",
   );
+  const [billingMultiplier, setBillingMultiplier] = useState(
+    initialData?.meta?.billingMultiplier ?? "",
+  );
+  // 只有走本地路由的应用记得到按供应商的花费；官方卡的花费跟单价无关，不显示。
+  const supportsBillingMultiplier =
+    appHas(appId, "localProxy") && category !== "official";
   const [localProxyHeadersOverride, setLocalProxyHeadersOverride] =
     useState<string>(() =>
       formatRequestOverrideObject(
@@ -1381,6 +1398,18 @@ function ProviderFormFull({
     (appId === "claude" || appId === "codex") && category !== "official";
 
   const handleSubmit = async (values: ProviderFormData) => {
+    if (
+      supportsBillingMultiplier &&
+      !isValidBillingMultiplier(billingMultiplier)
+    ) {
+      toast.error(
+        t("providerForm.billingMultiplierInvalid", {
+          defaultValue:
+            "Enter a decimal from 0 to 1000, or leave blank for 1×.",
+        }),
+      );
+      return;
+    }
     const overridesResult = shouldApplyLocalProxyRequestOverrides
       ? buildLocalProxyRequestOverrides(
           localProxyHeadersOverride,
@@ -1949,6 +1978,7 @@ function ProviderFormFull({
             ? rebaseOpenClawSuggestedDefaults(
                 activePreset.suggestedDefaults,
                 payload.providerKey,
+                savedOpenClawModelIds(payload.settingsConfig),
               )
             : activePreset.suggestedDefaults;
       }
@@ -2207,6 +2237,11 @@ function ProviderFormFull({
       delete nextMeta.githubAccountId;
     }
 
+    if (supportsBillingMultiplier) {
+      if (billingMultiplier.trim())
+        nextMeta.billingMultiplier = billingMultiplier.trim();
+      else delete nextMeta.billingMultiplier;
+    }
     payload.meta = nextMeta;
 
     await onSubmit(payload);
@@ -2845,6 +2880,10 @@ function ProviderFormFull({
               onFullUrlChange={setLocalIsFullUrl}
               customUserAgent={customUserAgent}
               onCustomUserAgentChange={setCustomUserAgent}
+              billingMultiplier={billingMultiplier}
+              onBillingMultiplierChange={
+                supportsBillingMultiplier ? setBillingMultiplier : undefined
+              }
               localProxyHeadersOverride={localProxyHeadersOverride}
               onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
               localProxyBodyOverride={localProxyBodyOverride}
@@ -2955,6 +2994,10 @@ function ProviderFormFull({
               speedTestEndpoints={speedTestEndpoints}
               customUserAgent={customUserAgent}
               onCustomUserAgentChange={setCustomUserAgent}
+              billingMultiplier={billingMultiplier}
+              onBillingMultiplierChange={
+                supportsBillingMultiplier ? setBillingMultiplier : undefined
+              }
               localProxyHeadersOverride={localProxyHeadersOverride}
               onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
               localProxyBodyOverride={localProxyBodyOverride}
@@ -2994,13 +3037,24 @@ function ProviderFormFull({
             />
           )}
 
-          {/* 切号只实现了 macOS；别的平台上不显示，卡上已有的绑定原样保留 */}
-          {appId === "agy" && category === "official" && isMac() && (
-            <AgyAccountSelect
-              value={selectedAgyAccountId}
-              onChange={setSelectedAgyAccountId}
+          {/* Gemini 表单没有高级区，倍率单独放在模型下面 */}
+          {appId === "gemini" && supportsBillingMultiplier && (
+            <BillingMultiplierField
+              id="gemini-billing-multiplier"
+              value={billingMultiplier}
+              onChange={setBillingMultiplier}
             />
           )}
+
+          {/* 切号只实现了 macOS、Windows；别的平台上不显示，卡上已有的绑定原样保留 */}
+          {appId === "agy" &&
+            category === "official" &&
+            canSwitchAgyAccount() && (
+              <AgyAccountSelect
+                value={selectedAgyAccountId}
+                onChange={setSelectedAgyAccountId}
+              />
+            )}
 
           {appId === "opencode" && !isAnyOmoCategory && !isNativeOpencode && (
             <OpenCodeFormFields
