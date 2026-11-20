@@ -4347,14 +4347,6 @@
     "settings": "Optionen",
     "settingsHasUpdate": "Einstellungen · Eine neue Version von CC Switch ist verfügbar",
     "mode": {
-    "roleOverrides": {
-      "title": "Modellzuordnung für Rollen",
-      "description": "Ordnen Sie Rollen veröffentlichten Aggregationsmodellen zu. Rollen ohne Zuordnung folgen dem Standardanbieter. Änderungen werden sofort gespeichert.",
-      "followDefault": "Standardanbieter verwenden",
-      "unavailable": "nicht verfügbar",
-      "unavailableHint": "Dieses Modell wird nicht mehr veröffentlicht. Die Zuordnung bleibt erhalten. Anfragen schlagen fehl, bis das Modell wieder verfügbar ist oder die Zuordnung geändert wird.",
-      "saveFailed": "Rolle konnte nicht gespeichert werden: {{error}}"
-    },
       "route": "Routing",
       "stack": "Aggregation"
     },
@@ -4532,6 +4524,14 @@
       "direct": "Direkt: CC Switch greift nie in Ihre Anfragen ein; der Client spricht selbst mit dem gewählten Anbieter und bietet so das nativste Erlebnis.",
       "route": "Routing: Anfragen laufen über CC Switch auf diesem Rechner und schalten Anbieterwechsel im laufenden Betrieb, Failover, Formatkonvertierung und weitere erweiterte Funktionen frei.",
       "stack": "Aggregation: Modelle mehrerer Anbieter stehen gemeinsam in /model, sodass Sie im Client nahtlos zwischen ihnen wechseln können."
+    },
+    "roleOverrides": {
+      "title": "Modellzuordnung für Rollen",
+      "description": "Ordnen Sie Rollen veröffentlichten Aggregationsmodellen zu. Rollen ohne Zuordnung folgen dem Standardanbieter. Änderungen werden sofort gespeichert.",
+      "followDefault": "Standardanbieter verwenden",
+      "unavailable": "nicht verfügbar",
+      "unavailableHint": "Dieses Modell wird nicht mehr veröffentlicht. Die Zuordnung bleibt erhalten. Anfragen schlagen fehl, bis das Modell wieder verfügbar ist oder die Zuordnung geändert wird.",
+      "saveFailed": "Rolle konnte nicht gespeichert werden: {{error}}"
     }
   },
   "providerCard": {
