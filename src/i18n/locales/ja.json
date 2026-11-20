@@ -1987,6 +1987,12 @@
     "directModeFormatSwitch": "この形式は直結モードでは使えません。ルーティングか集約に切り替えるとこのカードを使えます。"
   },
   "copilot": {
+    "warmupOptimization": "リクエストの最適化（詳細）",
+    "warmupDowngrade": "ウォームアップリクエストに別のモデルを使用する",
+    "warmupModel": "ウォームアップモデル",
+    "warmupChooseModel": "対応する Copilot モデルを選択",
+    "warmupMissing": "利用可能なモデルを選択してください。選択しない場合は元のモデルが使用されます。",
+    "warmupHint": "既定ではオフです。CC Switch は使用中のアカウントごとにモデルの可用性を確認し、代替モデルが利用できない場合はリクエストされたモデルを使用します。",
     "automaticFormat": "モデルに応じてルーティングが自動選択",
     "automaticFormatHint": "Copilot の上流形式はモデルに応じてルーティングが自動選択し、手動設定は適用されません。",
     "authSection": "GitHub Copilot 認証",

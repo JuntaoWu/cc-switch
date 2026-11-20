@@ -1987,6 +1987,12 @@
     "directModeFormatSwitch": "直连模式下用不了这种格式，切到路由或聚合后才能用这张卡。"
   },
   "copilot": {
+    "warmupOptimization": "请求优化（高级）",
+    "warmupDowngrade": "为预热请求使用其他模型",
+    "warmupModel": "预热模型",
+    "warmupChooseModel": "选择支持的 Copilot 模型",
+    "warmupMissing": "请选择可用模型，否则将使用原模型。",
+    "warmupHint": "默认关闭。CC Switch 会针对每个活跃账户重新检查模型是否可用。如果替代模型不可用，将保留请求的模型。",
     "automaticFormat": "由路由按模型自动选择",
     "automaticFormatHint": "Copilot 的上游格式由路由按模型自动选择，手选格式不生效。",
     "authSection": "GitHub Copilot 认证",

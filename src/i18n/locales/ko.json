@@ -1987,6 +1987,12 @@
     "directModeFormatSwitch": "이 형식은 직접 연결 모드에서 사용할 수 없습니다. 이 카드를 사용하려면 라우팅 또는 통합 모드로 전환하세요."
   },
   "copilot": {
+    "warmupOptimization": "요청 최적화(고급)",
+    "warmupDowngrade": "워밍업 요청에 다른 모델 사용",
+    "warmupModel": "워밍업 모델",
+    "warmupChooseModel": "지원되는 Copilot 모델 선택",
+    "warmupMissing": "사용 가능한 모델을 선택하세요. 그렇지 않으면 원래 모델을 사용합니다.",
+    "warmupHint": "기본값은 꺼짐입니다. CC Switch는 활성 계정마다 모델 사용 가능 여부를 확인하고 대체 모델을 사용할 수 없으면 요청된 모델을 유지합니다.",
     "automaticFormat": "모델에 따라 자동 선택",
     "automaticFormatHint": "Copilot의 업스트림 형식은 라우팅에서 모델에 따라 자동으로 선택합니다. 수동으로 지정한 형식은 적용되지 않습니다.",
     "authSection": "GitHub Copilot 인증",
@@ -4341,6 +4347,14 @@
     "settings": "설정",
     "settingsHasUpdate": "설정 · 새로운 CC Switch 버전을 사용할 수 있습니다",
     "mode": {
+    "roleOverrides": {
+      "title": "역할별 모델 지정",
+      "description": "역할을 게시된 집계 모델에 연결합니다. 지정하지 않은 역할은 기본 공급자를 따릅니다. 변경 사항은 즉시 저장됩니다.",
+      "followDefault": "기본 공급자 사용",
+      "unavailable": "사용 불가",
+      "unavailableHint": "이 모델은 더 이상 게시되지 않습니다. 연결은 유지되며 모델을 복원하거나 연결을 변경할 때까지 요청이 실패합니다.",
+      "saveFailed": "역할을 저장할 수 없습니다: {{error}}"
+    },
       "route": "라우팅",
       "stack": "통합"
     },

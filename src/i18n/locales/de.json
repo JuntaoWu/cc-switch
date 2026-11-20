@@ -1987,6 +1987,12 @@
     "directModeFormatSwitch": "Dieses Format funktioniert im Direktmodus nicht; wechseln Sie zu Routing oder Aggregation, um diese Karte zu verwenden."
   },
   "copilot": {
+    "warmupOptimization": "Anfrageoptimierung (erweitert)",
+    "warmupDowngrade": "Für Aufwärmanfragen ein anderes Modell verwenden",
+    "warmupModel": "Modell für Aufwärmanfragen",
+    "warmupChooseModel": "Ein unterstütztes Copilot-Modell auswählen",
+    "warmupMissing": "Wählen Sie ein verfügbares Modell. Andernfalls wird das ursprüngliche Modell verwendet.",
+    "warmupHint": "Standardmäßig deaktiviert. CC Switch prüft die Verfügbarkeit für jedes aktive Konto und behält das angeforderte Modell bei, wenn das Ersatzmodell fehlt.",
     "automaticFormat": "Wird automatisch vom Routing gewählt",
     "automaticFormatHint": "Das Routing wählt das Upstream-Format von Copilot pro Modell; manuelle Formateinstellungen werden ignoriert.",
     "authSection": "GitHub-Copilot-Authentifizierung",
@@ -4341,6 +4347,14 @@
     "settings": "Optionen",
     "settingsHasUpdate": "Einstellungen · Eine neue Version von CC Switch ist verfügbar",
     "mode": {
+    "roleOverrides": {
+      "title": "Modellzuordnung für Rollen",
+      "description": "Ordnen Sie Rollen veröffentlichten Aggregationsmodellen zu. Rollen ohne Zuordnung folgen dem Standardanbieter. Änderungen werden sofort gespeichert.",
+      "followDefault": "Standardanbieter verwenden",
+      "unavailable": "nicht verfügbar",
+      "unavailableHint": "Dieses Modell wird nicht mehr veröffentlicht. Die Zuordnung bleibt erhalten. Anfragen schlagen fehl, bis das Modell wieder verfügbar ist oder die Zuordnung geändert wird.",
+      "saveFailed": "Rolle konnte nicht gespeichert werden: {{error}}"
+    },
       "route": "Routing",
       "stack": "Aggregation"
     },

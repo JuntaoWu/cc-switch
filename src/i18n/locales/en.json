@@ -1987,6 +1987,12 @@
     "directModeFormatSwitch": "This format doesn't work in direct mode; switch to routing or Aggregation to use this card."
   },
   "copilot": {
+    "warmupOptimization": "Request optimization (advanced)",
+    "warmupDowngrade": "Use another model for warmup requests",
+    "warmupModel": "Warmup model",
+    "warmupChooseModel": "Select a supported Copilot model",
+    "warmupMissing": "Choose an available model; otherwise the original model will be used.",
+    "warmupHint": "Off by default. Model availability is checked again for each active account; if unavailable, CC Switch preserves the requested model.",
     "automaticFormat": "Selected automatically by routing",
     "automaticFormatHint": "Routing selects the Copilot upstream format per model; manual format settings are ignored.",
     "authSection": "GitHub Copilot Authentication",

@@ -1918,6 +1918,12 @@
     "directModeFormatSwitch": "Bu biçim doğrudan modda çalışmaz; Bu kartı kullanmak için yönlendirmeye veya Birleştirme'ya geçin."
   },
   "copilot": {
+    "warmupOptimization": "İstek optimizasyonu (gelişmiş)",
+    "warmupDowngrade": "Isınma istekleri için başka bir model kullan",
+    "warmupModel": "Isınma modeli",
+    "warmupChooseModel": "Desteklenen bir Copilot modeli seçin",
+    "warmupMissing": "Kullanılabilir bir model seçin. Aksi durumda özgün model kullanılır.",
+    "warmupHint": "Varsayılan olarak kapalıdır. CC Switch her etkin hesap için model kullanılabilirliğini yeniden denetler ve alternatif kullanılamıyorsa istenen modeli korur.",
     "automaticFormat": "Yönlendirme tarafından otomatik seçilir",
     "automaticFormatHint": "Yönlendirme, her model için Copilot üst akış biçimini seçer; elle belirlenen biçim ayarları yok sayılır.",
     "authSection": "GitHub Copilot Kimlik Doğrulaması",

@@ -563,7 +563,7 @@ export function ClaudeFormFields({
             {modelsLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              t("providerForm.reload", { defaultValue: "Reload" })
+              t("common.refresh")
             )}
           </Button>
         </div>
